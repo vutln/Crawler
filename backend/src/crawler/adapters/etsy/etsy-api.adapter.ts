@@ -1,0 +1,125 @@
+import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Marketplace } from '../../../generated/prisma/client';
+import { cleanText, normalizeCurrency } from '../../normalize';
+import { ThrottleService } from '../../politeness/throttle.service';
+import type {
+  CrawlContext,
+  MarketplaceAdapter,
+  ProductRecord,
+} from '../adapter.interface';
+
+interface EtsyListing {
+  listing_id: number;
+  title: string;
+  url: string;
+  price?: { amount: number; divisor: number; currency_code: string };
+  quantity?: number;
+  shop_id?: number;
+  num_favorers?: number;
+  images?: Array<{ url_570xN?: string; url_fullxfull?: string }>;
+}
+
+/**
+ * Etsy via the official Open API v3.
+ *
+ * Same interface as EtsySeleniumAdapter, no browser. Outranks it (100 > 10)
+ * whenever ETSY_API_KEY is present.
+ */
+@Injectable()
+export class EtsyApiAdapter implements MarketplaceAdapter {
+  readonly marketplace = Marketplace.ETSY;
+  readonly name = 'etsy-api';
+  readonly priority = 100;
+  readonly capabilities = { search: true, productDetail: true };
+
+  private readonly apiKey?: string;
+  private readonly base = 'https://openapi.etsy.com/v3/application';
+
+  constructor(
+    private readonly config: ConfigService,
+    private readonly throttle: ThrottleService,
+  ) {
+    this.apiKey = this.config.get<string>('ETSY_API_KEY');
+  }
+
+  isAvailable(): boolean {
+    return Boolean(this.apiKey);
+  }
+
+  async *search(ctx: CrawlContext): AsyncIterable<ProductRecord> {
+    if (!ctx.query) throw new Error('Etsy search requires a query');
+
+    const pageSize = Math.min(100, ctx.maxItems);
+    let emitted = 0;
+
+    for (let page = 0; page < ctx.maxPages; page++) {
+      if (ctx.signal.aborted || emitted >= ctx.maxItems) return;
+
+      const url =
+        `${this.base}/listings/active?keywords=${encodeURIComponent(ctx.query)}` +
+        `&limit=${pageSize}&offset=${page * pageSize}&includes=Images`;
+
+      const body = await this.request<{ results?: EtsyListing[] }>(url, ctx);
+      const results = body.results ?? [];
+      if (results.length === 0) return;
+
+      for (const listing of results) {
+        if (emitted >= ctx.maxItems) return;
+        yield this.toRecord(listing);
+        emitted++;
+      }
+    }
+  }
+
+  async fetchProduct(url: string, ctx: CrawlContext): Promise<ProductRecord | null> {
+    const listingId = /\/listing\/(\d+)/.exec(url)?.[1];
+    if (!listingId) throw new Error(`Not an Etsy listing URL: ${url}`);
+
+    try {
+      const listing = await this.request<EtsyListing>(
+        `${this.base}/listings/${listingId}?includes=Images`,
+        ctx,
+      );
+      return this.toRecord(listing);
+    } catch (err) {
+      if ((err as Error).message.includes('404')) return null;
+      throw err;
+    }
+  }
+
+  private toRecord(listing: EtsyListing): ProductRecord {
+    return {
+      externalId: String(listing.listing_id),
+      url: listing.url,
+      title: cleanText(listing.title),
+      // Etsy sends money as amount/divisor (e.g. 1250/100 = 12.50) to dodge
+      // float issues. Dividing here is correct; treating `amount` as the price
+      // would be off by 100x.
+      price: listing.price ? listing.price.amount / listing.price.divisor : null,
+      currency: normalizeCurrency(listing.price?.currency_code),
+      inStock: (listing.quantity ?? 0) > 0,
+      imageUrl: listing.images?.[0]?.url_570xN ?? listing.images?.[0]?.url_fullxfull,
+      seller: listing.shop_id ? String(listing.shop_id) : undefined,
+      reviewCount: listing.num_favorers,
+      raw: listing,
+    };
+  }
+
+  private async request<T>(url: string, ctx: CrawlContext): Promise<T> {
+    await this.throttle.acquire(url, ctx.signal);
+
+    const res = await fetch(url, {
+      headers: { 'x-api-key': this.apiKey!, Accept: 'application/json' },
+      signal: ctx.signal,
+    });
+
+    if (!res.ok) {
+      this.throttle.recordFailure(url);
+      throw new Error(`Etsy API ${res.status}: ${cleanText(await res.text(), 300)}`);
+    }
+
+    this.throttle.recordSuccess(url);
+    return (await res.json()) as T;
+  }
+}

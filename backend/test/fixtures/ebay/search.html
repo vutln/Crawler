@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>vintage film camera | eBay</title>
+</head>
+<body>
+<!--
+  SYNTHETIC FIXTURE — hand-authored, not captured from live eBay.
+
+  Read this before trusting it: because the selectors and this markup were
+  written together, this file CANNOT prove the adapter matches real eBay's DOM.
+  Only test:canary (which hits the live site) can do that.
+
+  What it DOES prove, deterministically and offline: that parseCard correctly
+  extracts ids from hrefs, integrates with parsePrice, and — most importantly —
+  filters out the junk rows below (ads, priceless listings, linkless rows)
+  instead of persisting them as products. Those are real regressions this catches.
+
+  Replace with real markup via: npm run fixtures:capture
+-->
+<ul class="srp-results">
+
+  <!-- 1. Ordinary listing -->
+  <li class="s-item">
+    <div class="s-item__wrapper">
+      <a class="s-item__link" href="https://www.ebay.com/itm/285000000001?_trkparms=abc&amp;hash=item42">
+        <div class="s-item__image-wrapper">
+          <img class="s-item__image-img" src="https://i.ebayimg.com/images/g/aaa/s-l225.jpg" alt="">
+        </div>
+        <div class="s-item__info">
+          <div class="s-item__title"><span role="heading">Canon AE-1 35mm SLR Film Camera with 50mm f/1.8 Lens</span></div>
+          <div class="s-item__subtitle">Pre-Owned · Tested</div>
+          <span class="s-item__price">$149.50</span>
+          <span class="s-item__seller-info-text">retro_optics (1,204) 99.2%</span>
+          <span class="s-item__reviews-count"><span>1,204 product ratings</span></span>
+        </div>
+      </a>
+    </div>
+  </li>
+
+  <!-- 2. "New Listing" prefix — must be stripped from the title -->
+  <li class="s-item">
+    <div class="s-item__wrapper">
+      <a class="s-item__link" href="https://www.ebay.com/itm/vintage-nikon-fm2/285000000002">
+        <div class="s-item__image-wrapper">
+          <img class="s-item__image-img" src="https://i.ebayimg.com/images/g/bbb/s-l225.jpg" alt="">
+        </div>
+        <div class="s-item__info">
+          <div class="s-item__title"><span role="heading">New ListingNikon FM2 Body Only, Black</span></div>
+          <div class="s-item__subtitle">Pre-Owned</div>
+          <span class="s-item__price">$412.00</span>
+          <span class="s-item__seller-info-text">camera_vault (88) 100%</span>
+        </div>
+      </a>
+    </div>
+  </li>
+
+  <!-- 3. EU-formatted price range — low end + EUR expected -->
+  <li class="s-item">
+    <div class="s-item__wrapper">
+      <a class="s-item__link" href="https://www.ebay.com/itm/285000000003">
+        <div class="s-item__info">
+          <div class="s-item__title"><span role="heading">Leica M6 Rangefinder, Various Kits</span></div>
+          <div class="s-item__subtitle">Pre-Owned</div>
+          <span class="s-item__price">€1.234,56 to €2.100,00</span>
+          <span class="s-item__seller-info-text">de_optik (512) 99.8%</span>
+        </div>
+      </a>
+    </div>
+  </li>
+
+  <!-- 4. JUNK: eBay's promo row. Has a link but no real listing id -> must be dropped -->
+  <li class="s-item">
+    <div class="s-item__wrapper">
+      <a class="s-item__link" href="https://www.ebay.com/deals">
+        <div class="s-item__info">
+          <div class="s-item__title"><span role="heading">Shop on eBay</span></div>
+          <span class="s-item__price">$20.00</span>
+        </div>
+      </a>
+    </div>
+  </li>
+
+  <!-- 5. Listing with no resolvable price -> price null, inStock false, still kept -->
+  <li class="s-item">
+    <div class="s-item__wrapper">
+      <a class="s-item__link" href="https://www.ebay.com/itm/285000000005">
+        <div class="s-item__info">
+          <div class="s-item__title"><span role="heading">Olympus OM-1 Parts Camera</span></div>
+          <div class="s-item__subtitle">Sold Out</div>
+          <span class="s-item__price">See options</span>
+        </div>
+      </a>
+    </div>
+  </li>
+
+  <!-- 6. JUNK: separator row, no link at all -> must not crash the parser -->
+  <li class="s-item">
+    <div class="s-item__wrapper">
+      <div class="s-item__info">
+        <div class="s-item__title"><span role="heading">Results matching fewer words</span></div>
+      </div>
+    </div>
+  </li>
+
+</ul>
+</body>
+</html>

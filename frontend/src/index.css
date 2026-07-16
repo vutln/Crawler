@@ -1,0 +1,21 @@
+@import 'tailwindcss';
+
+/* Tailwind v4 is CSS-first — there is no tailwind.config.js. */
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+}
+
+/* Prices and counts must not jitter as digits change during polling. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}

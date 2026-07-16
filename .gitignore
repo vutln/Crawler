@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Secrets — *.example files are the committed templates
+.env
+.env.local
+.env.*.local
+
+# Prisma generated client (run `npx prisma generate`)
+backend/src/generated/
+
+# Test output
+coverage/
+test-artifacts/
+
+# Local tooling config (machine-specific; can contain local paths/credentials)
+.claude/settings.local.json
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editors / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.suo
+.DS_Store
+Thumbs.db

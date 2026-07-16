@@ -1,0 +1,162 @@
+// E-commerce data collector — data model
+//
+// Design note: this is a *collector*, not a scraper. The point is the time series.
+// Prices are therefore append-only (see PriceSnapshot) and are NEVER updated in place.
+
+generator client {
+  // Prisma 7 removed `prisma-client-js`. The new `prisma-client` generator is
+  // ESM-first, so `moduleFormat = "cjs"` is mandatory here — NestJS is CommonJS
+  // and the client simply will not import without it.
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  // Prisma 7 removed `url` from this block entirely. The connection string now
+  // lives in prisma.config.ts (for the CLI/migrations) and is handed to the
+  // PrismaClient constructor via a driver adapter at runtime.
+  provider = "mysql"
+}
+
+enum Marketplace {
+  AMAZON
+  ETSY
+  EBAY
+}
+
+enum CrawlJobType {
+  SEARCH
+  PRODUCT_URLS
+  CATEGORY
+}
+
+enum RunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  BLOCKED // anti-bot wall hit — detected and surfaced, never evaded
+}
+
+enum RunTrigger {
+  MANUAL
+  SCHEDULED
+}
+
+/// A product identity on a marketplace. Holds slow-changing metadata only.
+model Product {
+  id            String      @id @default(cuid())
+  marketplace   Marketplace
+  /// ASIN (Amazon) / listing id (Etsy) / item id (eBay)
+  externalId    String      @db.VarChar(191)
+  url           String      @db.Text
+  title         String      @db.Text
+  brand         String?     @db.VarChar(191)
+  seller        String?     @db.VarChar(191)
+  imageUrl      String?     @db.Text
+  currency      String      @db.Char(3)
+  rating        Decimal?    @db.Decimal(3, 2)
+  reviewCount   Int?
+  categoryId    String?
+  category      Category?   @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  firstSeenAt   DateTime    @default(now())
+  lastScrapedAt DateTime    @default(now()) @updatedAt
+
+  /// --- Denormalized mirror of the most recent PriceSnapshot ---
+  /// Written in the SAME transaction as the snapshot insert, so it cannot drift.
+  /// This does not violate the append-only rule: PriceSnapshot remains the
+  /// immutable source of truth for history. These columns exist purely so the
+  /// products list can filter and sort on price with a plain indexed WHERE
+  /// instead of a correlated subquery evaluated once per row.
+  currentPrice  Decimal? @db.Decimal(12, 2)
+  inStock       Boolean  @default(true)
+  snapshotCount Int      @default(0)
+
+  snapshots PriceSnapshot[]
+
+  /// Natural key: this pair IS the dedup strategy. Upserts target it.
+  @@unique([marketplace, externalId])
+  @@index([marketplace, lastScrapedAt])
+  @@index([categoryId])
+  @@index([currentPrice])
+  @@index([marketplace, currentPrice])
+}
+
+/// Append-only price observation. One row per product per scrape.
+/// This table is the entire reason the project exists — never UPDATE a price,
+/// always INSERT. Overwriting destroys the history.
+model PriceSnapshot {
+  id         String   @id @default(cuid())
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// Nullable: a listing can exist without a resolvable price.
+  price      Decimal? @db.Decimal(12, 2)
+  currency   String   @db.Char(3)
+  inStock    Boolean  @default(true)
+  seller     String?  @db.VarChar(191)
+  capturedAt DateTime @default(now())
+  crawlRunId String?
+  crawlRun   CrawlRun? @relation(fields: [crawlRunId], references: [id], onDelete: SetNull)
+
+  /// Serves the price-history query: WHERE productId = ? ORDER BY capturedAt
+  @@index([productId, capturedAt])
+  @@index([crawlRunId])
+}
+
+model Category {
+  id       String     @id @default(cuid())
+  name     String     @db.VarChar(191)
+  parentId String?
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Category[] @relation("CategoryTree")
+  products Product[]
+
+  @@index([parentId])
+}
+
+/// DEFINITION of work: "track 'mechanical keyboard' on eBay, daily".
+/// Kept separate from CrawlRun because a collector re-runs the same definition
+/// on a schedule — that repetition is what produces the price series.
+model CrawlJob {
+  id             String       @id @default(cuid())
+  name           String       @db.VarChar(191)
+  marketplace    Marketplace
+  type           CrawlJobType
+  query          String?      @db.VarChar(191)
+  /// string[] for PRODUCT_URLS jobs
+  urls           Json?
+  maxPages       Int          @default(3)
+  maxItems       Int          @default(100)
+  /// null = manual trigger only
+  cronExpression String?      @db.VarChar(191)
+  enabled        Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @default(now()) @updatedAt
+
+  runs CrawlRun[]
+
+  @@index([enabled, cronExpression])
+}
+
+/// One EXECUTION of a CrawlJob.
+model CrawlRun {
+  id           String     @id @default(cuid())
+  jobId        String
+  job          CrawlJob   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  status       RunStatus  @default(QUEUED)
+  trigger      RunTrigger
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  itemsFound   Int        @default(0)
+  itemsNew     Int        @default(0)
+  itemsUpdated Int        @default(0)
+  error        String?    @db.Text
+  createdAt    DateTime   @default(now())
+
+  snapshots PriceSnapshot[]
+
+  @@index([status, createdAt])
+  @@index([jobId, createdAt])
+}

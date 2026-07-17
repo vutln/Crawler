@@ -35,7 +35,19 @@ export class EbaySeleniumAdapter extends SeleniumAdapterBase {
     title: ['.s-item__title', '.s-card__title', 'h3.s-item__title', '[role="heading"]'],
     price: ['.s-item__price', '.s-card__price'],
     link: ['a.s-item__link', 'a.s-card__link', 'a[href*="/itm/"]'],
-    image: ['.s-item__image-wrapper img', '.s-card__image img', 'img.s-item__image-img'],
+    /**
+     * `img.s-card__image`, NOT `.s-card__image img`.
+     *
+     * s-card__image is the class ON the <img>, not a wrapper around one, so the
+     * descendant form searched for an <img> inside an <img> and matched nothing.
+     * With the two s-item entries already extinct, all three selectors were dead
+     * and eBay was collecting ZERO images — a required field — silently, because
+     * imageUrl is optional and nothing asserted it. Verified against
+     * test/fixtures/ebay/search-live.html: 112 of 114 carry a real i.ebayimg.com
+     * src. (The other 2 are the "Shop on eBay" promo rows, which parseCard drops
+     * by title anyway.)
+     */
+    image: ['img.s-card__image', '.s-item__image-wrapper img', 'img.s-item__image-img'],
     seller: ['.s-item__seller-info-text', '.s-card__seller-info'],
     reviews: ['.s-item__reviews-count', '.s-card__reviews-count'],
     subtitle: ['.s-item__subtitle', '.s-card__subtitle'],

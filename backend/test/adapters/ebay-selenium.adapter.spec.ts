@@ -13,8 +13,14 @@ import { createTestDriver } from '../fixtures/test-driver';
  * for reasons unrelated to our code, which trains everyone to ignore red.
  *
  * Scope check: this validates parsing LOGIC (id extraction, price integration,
- * junk-row filtering), not that our selectors still match production eBay.
- * Selector drift is what test:canary is for.
+ * junk-row filtering) against SYNTHETIC markup. It cannot tell you the selectors
+ * still match production eBay — the markup and the selectors were written
+ * together, so it agrees with itself by construction.
+ *
+ * That blind spot was real: while this file was green, every `s-item__*` selector
+ * it exercises had already gone extinct on live eBay (migrated to `s-card__*`).
+ * ebay-live-dom.spec.ts pins the real markup; test:canary catches future drift.
+ * This file keeps the junk rows a live capture won't reliably contain.
  */
 
 /**
@@ -32,7 +38,7 @@ class TestableEbayAdapter extends EbaySeleniumAdapter {
   }
 }
 
-describe('EbaySeleniumAdapter — fixture parsing', () => {
+describe('EbaySeleniumAdapter — synthetic fixture parsing', () => {
   let server: FixtureServer;
   let driver: WebDriver;
   let records: ProductRecord[];
@@ -42,7 +48,7 @@ describe('EbaySeleniumAdapter — fixture parsing', () => {
     await server.start();
     driver = await createTestDriver({ offline: true });
 
-    await driver.get(server.url('ebay/search.html'));
+    await driver.get(server.url('ebay/search-synthetic.html'));
     records = await new TestableEbayAdapter().parse(driver);
   }, 90_000);
 

@@ -80,7 +80,8 @@ export class RobotsService {
     }
 
     const cached = this.cache.get(origin);
-    if (cached && Date.now() - cached.fetchedAt < this.ttlMs) return cached.robot;
+    if (cached && Date.now() - cached.fetchedAt < this.ttlMs)
+      return cached.robot;
 
     let robot: Robot | null = null;
     try {
@@ -91,12 +92,16 @@ export class RobotsService {
       if (res.ok) {
         robot = robotsParser(robotsUrl, await res.text());
       } else {
-        this.logger.debug(`${robotsUrl} -> HTTP ${res.status}; treating as unrestricted`);
+        this.logger.debug(
+          `${robotsUrl} -> HTTP ${res.status}; treating as unrestricted`,
+        );
       }
     } catch (err) {
       // Network failure is not consent, but it is also not a ban. Log and allow;
       // the throttle still paces us.
-      this.logger.warn(`Could not fetch ${robotsUrl}: ${(err as Error).message}`);
+      this.logger.warn(
+        `Could not fetch ${robotsUrl}: ${(err as Error).message}`,
+      );
     }
 
     this.cache.set(origin, { robot, fetchedAt: Date.now() });

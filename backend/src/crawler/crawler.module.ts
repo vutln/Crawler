@@ -1,8 +1,11 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 
-import { MARKETPLACE_ADAPTER, type MarketplaceAdapter } from './adapters/adapter.interface';
+import {
+  MARKETPLACE_ADAPTER,
+  type MarketplaceAdapter,
+} from './adapters/adapter.interface';
 import { AdapterRegistry } from './adapters/adapter.registry';
 import { AmazonSeleniumAdapter } from './adapters/amazon/amazon-selenium.adapter';
 import { EbayApiAdapter } from './adapters/ebay/ebay-api.adapter';

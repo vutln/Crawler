@@ -30,15 +30,36 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
 
   private readonly sel = {
     resultItem: ['div[data-asin][data-component-type="s-search-result"]'],
-    title: ['h2 a span', 'h2 span', '.a-size-medium.a-color-base.a-text-normal'],
-    link: ['h2 a.a-link-normal', 'a.a-link-normal.s-no-outline', 'a.a-link-normal'],
+    title: [
+      'h2 a span',
+      'h2 span',
+      '.a-size-medium.a-color-base.a-text-normal',
+    ],
+    link: [
+      'h2 a.a-link-normal',
+      'a.a-link-normal.s-no-outline',
+      'a.a-link-normal',
+    ],
     // Amazon renders price split across spans; .a-offscreen holds the whole
     // string for screen readers and is by far the most stable hook.
-    price: ['.a-price .a-offscreen', 'span.a-price > span.a-offscreen', '.a-color-price'],
+    price: [
+      '.a-price .a-offscreen',
+      'span.a-price > span.a-offscreen',
+      '.a-color-price',
+    ],
     image: ['img.s-image'],
-    rating: ['[data-cy="reviews-ratings-slot"] span.a-icon-alt', 'span.a-icon-alt'],
-    reviews: ['[data-csa-c-func-deps="aui-da-a-popover"] span', 'span.a-size-base.s-underline-text'],
-    brand: ['h5.s-line-clamp-1 span', '.a-row.a-size-base.a-color-secondary h5'],
+    rating: [
+      '[data-cy="reviews-ratings-slot"] span.a-icon-alt',
+      'span.a-icon-alt',
+    ],
+    reviews: [
+      '[data-csa-c-func-deps="aui-da-a-popover"] span',
+      'span.a-size-base.s-underline-text',
+    ],
+    brand: [
+      'h5.s-line-clamp-1 span',
+      '.a-row.a-size-base.a-color-secondary h5',
+    ],
   };
 
   async *search(ctx: CrawlContext): AsyncIterable<ProductRecord> {
@@ -91,7 +112,10 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
    * Split out from search() so tests can point a driver at a captured HTML
    * fixture and exercise the real parser offline.
    */
-  protected async parseSearchPage(driver: WebDriver, context = 'Amazon'): Promise<ProductRecord[]> {
+  protected async parseSearchPage(
+    driver: WebDriver,
+    context = 'Amazon',
+  ): Promise<ProductRecord[]> {
     const rendered = await this.waitForAny(driver, this.sel.resultItem);
     if (!rendered) {
       // Throws BlockedError if this is a wall rather than a genuinely empty
@@ -101,7 +125,9 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
       return [];
     }
 
-    const elements = await driver.findElements(By.css(this.sel.resultItem.join(', ')));
+    const elements = await driver.findElements(
+      By.css(this.sel.resultItem.join(', ')),
+    );
     const out: ProductRecord[] = [];
 
     for (const el of elements) {
@@ -135,19 +161,27 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
       imageUrl: await this.attrOf(el, this.sel.image, 'src'),
       rating: parseRating(await this.textOf(el, this.sel.rating)),
       reviewCount: parseReviewCount(await this.textOf(el, this.sel.reviews)),
-      brand: cleanText((await this.textOf(el, this.sel.brand)) ?? '', 191) || undefined,
+      brand:
+        cleanText((await this.textOf(el, this.sel.brand)) ?? '', 191) ||
+        undefined,
       raw: { priceText },
     };
   }
 
-  async fetchProduct(url: string, ctx: CrawlContext): Promise<ProductRecord | null> {
+  async fetchProduct(
+    url: string,
+    ctx: CrawlContext,
+  ): Promise<ProductRecord | null> {
     const asin = this.extractAsin(url);
     if (!asin) throw new Error(`Could not extract ASIN from ${url}`);
 
     return this.drivers.withDriver(async (driver) => {
       await this.navigate(driver, url, ctx);
 
-      const rendered = await this.waitForAny(driver, ['#productTitle', '#dp-container']);
+      const rendered = await this.waitForAny(driver, [
+        '#productTitle',
+        '#dp-container',
+      ]);
       if (!rendered) return null;
 
       const body = await driver.findElement(By.css('body'));
@@ -163,7 +197,10 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
       ]);
       const { price, currency } = parsePrice(priceText);
 
-      const availability = await this.textOf(body, ['#availability span', '#availability']);
+      const availability = await this.textOf(body, [
+        '#availability span',
+        '#availability',
+      ]);
 
       return {
         externalId: asin,
@@ -174,11 +211,28 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
         inStock:
           price !== null &&
           !/currently unavailable|out of stock/i.test(availability ?? ''),
-        imageUrl: await this.attrOf(body, ['#landingImage', '#imgBlkFront'], 'src'),
-        rating: parseRating(await this.textOf(body, ['#acrPopover .a-icon-alt', 'span.a-icon-alt'])),
-        reviewCount: parseReviewCount(await this.textOf(body, ['#acrCustomerReviewText'])),
-        brand: cleanText((await this.textOf(body, ['#bylineInfo'])) ?? '', 191) || undefined,
-        seller: cleanText((await this.textOf(body, ['#sellerProfileTriggerId'])) ?? '', 191) || undefined,
+        imageUrl: await this.attrOf(
+          body,
+          ['#landingImage', '#imgBlkFront'],
+          'src',
+        ),
+        rating: parseRating(
+          await this.textOf(body, [
+            '#acrPopover .a-icon-alt',
+            'span.a-icon-alt',
+          ]),
+        ),
+        reviewCount: parseReviewCount(
+          await this.textOf(body, ['#acrCustomerReviewText']),
+        ),
+        brand:
+          cleanText((await this.textOf(body, ['#bylineInfo'])) ?? '', 191) ||
+          undefined,
+        seller:
+          cleanText(
+            (await this.textOf(body, ['#sellerProfileTriggerId'])) ?? '',
+            191,
+          ) || undefined,
         raw: { priceText, availability },
       };
     });
@@ -186,7 +240,9 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
 
   private extractAsin(url: string): string | null {
     return (
-      /\/(?:dp|gp\/product|product)\/([A-Z0-9]{10})/i.exec(url)?.[1]?.toUpperCase() ?? null
+      /\/(?:dp|gp\/product|product)\/([A-Z0-9]{10})/i
+        .exec(url)?.[1]
+        ?.toUpperCase() ?? null
     );
   }
 }

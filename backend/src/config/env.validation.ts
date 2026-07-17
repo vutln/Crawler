@@ -141,7 +141,10 @@ export function validateEnv(raw: Record<string, unknown>): EnvVars {
   const errors = validateSync(config, { skipMissingProperties: false });
   if (errors.length > 0) {
     const details = errors
-      .map((e) => `  - ${e.property}: ${Object.values(e.constraints ?? {}).join(', ')}`)
+      .map(
+        (e) =>
+          `  - ${e.property}: ${Object.values(e.constraints ?? {}).join(', ')}`,
+      )
       .join('\n');
     // Fail at boot with something actionable rather than a null-deref 40 frames deep.
     throw new Error(`Invalid environment configuration:\n${details}`);

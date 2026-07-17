@@ -47,10 +47,29 @@ export class EtsyApiAdapter implements MarketplaceAdapter {
     return Boolean(this.apiKey);
   }
 
+  /**
+   * Items per page. Approximates Etsy's search grid rather than using the API's
+   * 100 maximum, so "page N" means roughly the same on both paths.
+   *
+   * UNVERIFIED, unlike the eBay equivalent, and worth knowing why: ebay-selenium
+   * sets its own page size (`&_ipg=60`), so parity there is exact by construction.
+   * etsy-selenium requests `/search?q=…&page=N` and lets the SITE choose, so the
+   * true number can only come from a real capture — and there is no Etsy fixture
+   * because Etsy is currently blocking this egress.
+   *
+   * 64 is the closer guess (Etsy's grid is nowhere near 100), but treat it as an
+   * assumption: capture a fixture via `npm run fixtures:capture -- etsy "..."` from
+   * an unblocked host, count the listing cards, and correct this. Until then a
+   * maxPages of 2 collects ~128 listings here, which may not be exactly the site's
+   * first two pages.
+   */
+  private static readonly PAGE_SIZE = 64;
+
   async *search(ctx: CrawlContext): AsyncIterable<ProductRecord> {
     if (!ctx.query) throw new Error('Etsy search requires a query');
 
-    const pageSize = Math.min(100, ctx.maxItems);
+    // Infinity-safe: Math.min(64, Infinity) is 64. maxItems still wins when lower.
+    const pageSize = Math.min(EtsyApiAdapter.PAGE_SIZE, ctx.maxItems);
     let emitted = 0;
 
     for (let page = 0; page < ctx.maxPages; page++) {

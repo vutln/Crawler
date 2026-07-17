@@ -58,10 +58,28 @@ export class EbayApiAdapter implements MarketplaceAdapter {
     return Boolean(this.appId && this.certId);
   }
 
+  /**
+   * Items per page, deliberately matching ebay-selenium's `&_ipg=60` rather than
+   * the API's 200 maximum.
+   *
+   * Makes "page N" mean the same thing on both paths. Without it the two disagree:
+   * a sweep with maxItems unset (bounded only by maxPages) computes
+   * Math.min(200, Infinity) = 200, so maxPages: 2 collects 400 listings here but
+   * ~120 through the browser — the same keyword producing a different dataset
+   * depending on whether EBAY_APP_ID happens to be set. That is a config flag
+   * silently changing what the data means, which is worse than either bound.
+   *
+   * Verified against test/fixtures/ebay/search-live.html: a real `_ipg=60` page
+   * carries 62 li.s-card (60 listings + 2 promo rows parseCard drops).
+   */
+  private static readonly PAGE_SIZE = 60;
+
   async *search(ctx: CrawlContext): AsyncIterable<ProductRecord> {
     if (!ctx.query) throw new Error('eBay search requires a query');
 
-    const pageSize = Math.min(200, ctx.maxItems);
+    // min() with maxItems still matters: a job that asks for 25 items should not
+    // pull 60. Infinity-safe — Math.min(60, Infinity) is 60.
+    const pageSize = Math.min(EbayApiAdapter.PAGE_SIZE, ctx.maxItems);
     let emitted = 0;
 
     for (let page = 0; page < ctx.maxPages; page++) {

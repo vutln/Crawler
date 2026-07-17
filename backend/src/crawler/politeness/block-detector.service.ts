@@ -19,11 +19,6 @@ export class BlockDetectorService {
     { pattern: /To discuss automated access to Amazon data/i, reason: 'Amazon automated-access notice' },
     { pattern: /api-services-support@amazon\.com/i, reason: 'Amazon automated-access notice' },
 
-    {
-      pattern: /Sorry!\s*Something went wrong/i,
-      reason: 'Amazon "Dogs of Amazon" error page — soft block or transient error',
-    },
-
     // eBay
     { pattern: /Pardon Our Interruption/i, reason: 'eBay/Distil interstitial' },
     { pattern: /ebay\.com\/splashui\/captcha/i, reason: 'eBay CAPTCHA' },
@@ -31,6 +26,43 @@ export class BlockDetectorService {
     // Etsy
     { pattern: /you'?re browsing Etsy from a device we don'?t recognize/i, reason: 'Etsy device challenge' },
     { pattern: /Access is temporarily restricted/i, reason: 'Etsy access restriction' },
+
+    // The marketplace house error page — Amazon's "Dogs of Amazon", eBay's
+    // "Error Page | eBay". A generic error page that both sites also serve as a
+    // soft block once an IP has made enough automated requests: the same URL that
+    // worked yesterday returns this today.
+    //
+    // Genuinely ambiguous: it can be a real transient 5xx. Classified BLOCKED
+    // anyway because it is never a successful search, and FAILED invites a retry
+    // loop that deepens the throttle. Repeat-visitor IPs see it far more often
+    // than real outages would explain.
+    //
+    // REGRESSION — this lived under Amazon as /Sorry!\s*Something went wrong/ and
+    // silently missed eBay, whose page reads "SORRY Something went wrong on our
+    // end": identical wording, no exclamation mark. That page carries ~190 chars
+    // of body text, so diagnoseEmptyPage's empty-body backstop (50) cleared it
+    // too, and eBay crawls reported SUCCEEDED / 0 items while the site was
+    // refusing every request. Exactly the near-miss the Etsy signature below was
+    // loosened to prevent — the second time this list has rotted the same way.
+    //
+    // Vendor-agnostic on purpose: both sites use the phrasing, and the adapter
+    // already prefixes the marketplace onto the reason.
+    //
+    // TWO independent hooks, because what gets scanned is getPageSource() — raw
+    // HTML, not rendered text. eBay puts the two halves in separate elements:
+    //   <p class="error-header__headline">SORRY</p><div id="error-info"><p>Something went wrong...
+    // so no \s* can bridge them, and a pattern built by reading the page in a
+    // browser matches text that never appears in the source. Amazon runs them
+    // together in one <h1> and in its <title>, where "on our end" is absent.
+    // Neither hook alone covers both sites.
+    {
+      pattern: /Sorry[!,.]?\s*Something went wrong/i,
+      reason: 'Marketplace error page — soft block or transient error',
+    },
+    {
+      pattern: /Something went wrong on our end/i,
+      reason: 'Marketplace error page — soft block or transient error',
+    },
 
     // Generic vendors
     { pattern: /<title>\s*Just a moment/i, reason: 'Cloudflare challenge' },

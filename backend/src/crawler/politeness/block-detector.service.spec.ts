@@ -90,7 +90,68 @@ describe('BlockDetectorService', () => {
     it('detects the Amazon "Dogs of Amazon" error page', () => {
       const signal = detector.inspect({ html: AMAZON_DOGS });
       expect(signal.blocked).toBe(true);
-      expect(signal.reason).toMatch(/Dogs of Amazon/i);
+      // Reason is no longer Amazon-specific: eBay serves the same page, and the
+      // adapter prefixes the marketplace onto it. See EBAY_ERROR_PAGE below.
+      expect(signal.reason).toMatch(/error page/i);
+    });
+
+    /**
+     * REGRESSION — reported from a live eBay crawl that returned SUCCEEDED / 0 items.
+     *
+     * eBay serves the same house error page as Amazon, and every layer missed it:
+     *
+     *   1. The signature was scoped to Amazon as /Sorry!\s*Something went wrong/.
+     *      eBay's reads "SORRY Something went wrong on our end" — no exclamation
+     *      mark. One character, and the pattern skipped it.
+     *   2. Its ~190 chars of body text cleared diagnoseEmptyPage's 50-char
+     *      empty-body backstop, so the last-resort net missed it too.
+     *
+     * So parseSearchPage returned [], search() saw an empty page and stopped, and
+     * the run reported SUCCEEDED / 0 — indistinguishable from "eBay has no film
+     * cameras", while eBay was in fact refusing every request.
+     *
+     * The second trap is why the two hooks exist. inspect() scans getPageSource(),
+     * and eBay splits the phrase across elements, so the obvious pattern written by
+     * reading the rendered page matches text that is not in the source:
+     *
+     *   <p class="error-header__headline">SORRY</p><div id="error-info"><p>Something went wrong on our end</p>
+     *
+     * Verbatim source from https://www.ebay.com/sch/i.html?_nkw=vintage+film+camera:
+     */
+    const EBAY_ERROR_PAGE =
+      `<html lang="en"><head><meta name="robots" content="noindex,nofollow">` +
+      `<title>Error Page | eBay</title></head><body><main class="main-content">` +
+      `<div class="status--container"><div class="error-header">` +
+      `<div class="error-header__text-block">` +
+      `<p class="error-header__headline">SORRY</p>` +
+      `<div id="error-info"><p>Something went wrong on our end</p><hr>` +
+      `<p class="reference-id">0.83e6ab71.1784262567.a91819ea</p><hr>` +
+      `<p>Please go back and try again<br>or go to eBay Homepage.</p></div>` +
+      `<a class="fake-btn" href="https://www.ebay.com">Go to homepage</a>` +
+      `</div></div></div></main></body></html>`;
+
+    it('detects the eBay error page, whose phrasing carries no exclamation mark', () => {
+      const signal = detector.inspect({ html: EBAY_ERROR_PAGE, title: 'Error Page | eBay' });
+      expect(signal.blocked).toBe(true);
+      expect(signal.reason).toMatch(/error page/i);
+    });
+
+    it('matches eBay across the element boundary, not just the rendered text', () => {
+      // The half that does the work: "SORRY" and the phrase are in sibling nodes,
+      // so a \s*-bridged pattern would pass this page as healthy.
+      const signal = detector.inspect({
+        html: '<p class="x">SORRY</p><div><p>Something went wrong on our end</p></div>',
+      });
+      expect(signal.blocked).toBe(true);
+    });
+
+    it('does not flag a healthy eBay result page', () => {
+      const healthy =
+        '<li class="s-item"><h3 class="s-item__title">Canon AE-1</h3>' +
+        '<span class="s-item__price">$89.00</span></li>';
+      expect(detector.inspect({ html: healthy, title: 'vintage film camera | eBay' }).blocked).toBe(
+        false,
+      );
     });
 
     it('detects it from the title alone, before the 15s render timeout', () => {

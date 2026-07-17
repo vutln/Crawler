@@ -110,8 +110,7 @@ export function RunsTable() {
             <div className="mx-3 mb-2 rounded border border-purple-200 bg-purple-50 px-2 py-1.5 text-[11px] text-purple-900">
               <strong>Blocked:</strong> {blocked.error}
               <div className="mt-0.5 text-purple-700">
-                The site served an anti-bot page. This is detected and reported, not bypassed.
-                Configure an official API key for a reliable path.
+                The site served an anti-bot page.
               </div>
             </div>
           )}

@@ -86,6 +86,18 @@ export class BlockedError extends Error {
   constructor(
     message: string,
     readonly evidence?: string,
+    /**
+     * How long this host is owed before it is worth knocking again.
+     *
+     * Carried on the error because only the adapter knows which HOST was walled —
+     * the queue sees a run id and a status, and the throttle keys on hostname. Ask
+     * a marketplace-to-origin map to live in the queue and you have duplicated
+     * adapter knowledge in the one place that was designed not to have it.
+     *
+     * The queue uses this to wait out a cooldown instead of stampeding the rest of
+     * the batch through it — see InMemoryCrawlQueue.drain.
+     */
+    readonly retryAfterMs?: number,
   ) {
     super(message);
     this.name = 'BlockedError';

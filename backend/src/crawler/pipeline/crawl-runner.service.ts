@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma, RunStatus, type CrawlJob } from '../../generated/prisma/client';
+import { Prisma, RunStatus, type CrawlJob, type Keyword } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdapterRegistry } from '../adapters/adapter.registry';
 import { BlockedError, type CrawlContext, type ProductRecord } from '../adapters/adapter.interface';
@@ -11,6 +11,12 @@ export interface RunOutcome {
   itemsNew: number;
   itemsUpdated: number;
   error?: string;
+  /**
+   * On BLOCKED: how long the walled host is owed. Not persisted — it is advice to
+   * the queue, which uses it to wait out the cooldown rather than stampede the
+   * rest of the batch through it. See InMemoryCrawlQueue.drain.
+   */
+  cooldownMs?: number;
 }
 
 /** Mutable running tally, shared with collect() so a partial run still reports truthfully. */
@@ -46,7 +52,7 @@ export class CrawlRunnerService {
   async execute(runId: string): Promise<RunOutcome> {
     const run = await this.prisma.crawlRun.findUnique({
       where: { id: runId },
-      include: { job: true },
+      include: { job: true, keyword: true },
     });
     if (!run) throw new Error(`CrawlRun ${runId} not found`);
 
@@ -67,7 +73,7 @@ export class CrawlRunnerService {
 
     let outcome: RunOutcome;
     try {
-      outcome = await this.collect(run.job, runId, controller.signal, stats);
+      outcome = await this.collect(run.job, runId, controller.signal, stats, run.keyword);
     } catch (err) {
       outcome = { ...this.classify(err), ...toCounts(stats) };
       this.logger.error(`Run ${runId} failed: ${outcome.error}`);
@@ -106,12 +112,19 @@ export class CrawlRunnerService {
     runId: string,
     signal: AbortSignal,
     stats: Tally,
+    keyword: Keyword | null,
   ): Promise<RunOutcome> {
     const adapter = this.registry.resolve(job.marketplace);
     const logger = new Logger(`${adapter.name}:${runId.slice(0, 8)}`);
 
     const ctx: CrawlContext = {
-      query: job.query ?? undefined,
+      /**
+       * A sweep run carries its own keyword; everything else falls back to the
+       * job's single query. That fallback is what keeps legacy SEARCH jobs working
+       * unchanged, and it is the only line that knows a sweep exists — the adapters
+       * still just receive a query.
+       */
+      query: keyword?.text ?? job.query ?? undefined,
       urls: Array.isArray(job.urls) ? (job.urls as string[]) : undefined,
       maxPages: job.maxPages,
       /**
@@ -133,7 +146,10 @@ export class CrawlRunnerService {
     // no data for a price series.
     const persist = async (record: ProductRecord) => {
       stats.found++;
-      const result = await this.upsert(record, job.marketplace, runId);
+      // stats.found IS the 1-based position within this run, and adapters yield in
+      // page order — so rank costs nothing extra to capture and is the only way to
+      // answer "did we slip off page 1 for this keyword".
+      const result = await this.upsert(record, job.marketplace, runId, keyword?.id, stats.found);
       if (result === 'created') stats.created++;
       else stats.updated++;
     };
@@ -169,6 +185,8 @@ export class CrawlRunnerService {
     record: ProductRecord,
     marketplace: CrawlJob['marketplace'],
     runId: string,
+    keywordId?: string,
+    rank?: number,
   ): Promise<'created' | 'updated'> {
     const existing = await this.prisma.product.findUnique({
       where: {
@@ -262,6 +280,23 @@ export class CrawlRunnerService {
           crawlRunId: runId,
         },
       });
+
+      /**
+       * Which keyword surfaced this product. Inside the SAME transaction as the
+       * snapshot: a product row with no link would be invisible to the results
+       * screen's keyword filter while its price history quietly accumulated.
+       *
+       * Upsert, not create — a product legitimately reappears for the same keyword
+       * every single day, and lastSeenAt/lastRank are what make that a time series
+       * rather than a duplicate-key crash.
+       */
+      if (keywordId) {
+        await tx.productKeyword.upsert({
+          where: { productId_keywordId: { productId: product.id, keywordId } },
+          create: { productId: product.id, keywordId, marketplace, lastRank: rank },
+          update: { lastSeenAt: new Date(), lastRank: rank },
+        });
+      }
     });
 
     return existing ? 'updated' : 'created';
@@ -278,6 +313,7 @@ export class CrawlRunnerService {
         ...base,
         status: RunStatus.BLOCKED,
         error: `${err.message}${err.evidence ? ` | evidence: ${err.evidence}` : ''}`,
+        cooldownMs: err.retryAfterMs,
       };
     }
 

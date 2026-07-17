@@ -95,6 +95,27 @@ export class EnvVars {
   CRAWL_RESPECT_ROBOTS = true;
 
   /**
+   * IANA timezone the daily sweep's cron expressions are interpreted in.
+   *
+   * Load-bearing for a US-market collector, and wrong by default without it. The
+   * `cron` package uses the SERVER's local time when no timezone is given, so on
+   * this machine (ICT) "0 0 6 * * *" fires at 06:00 Vietnam time — 23:00 UTC the
+   * PREVIOUS day. Every snapshot's capturedAt then lands in a US timezone's
+   * yesterday, and ProductsService.priceHistory buckets by MySQL's DATE_FORMAT,
+   * so a "daily" price series silently splits across day boundaries.
+   *
+   * Defaults to UTC rather than America/New_York: UTC is the choice that behaves
+   * identically wherever this runs, which is the property a default should have.
+   * Set America/New_York if you want buckets aligned to the US market day.
+   *
+   * Validated by the `cron` package at registration; a bad value is logged and the
+   * job is skipped, never a boot failure — see SchedulerService.register.
+   */
+  @IsString()
+  @IsOptional()
+  CRAWL_TIMEZONE = 'UTC';
+
+  /**
    * Empty = send Chrome's own user-agent (the truthful default).
    * Set a value only to identify your crawler with something more specific.
    * Note the trade-off measured against Amazon: a non-browser UA gets the same

@@ -1,7 +1,9 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
-import { RunStatus, RunTrigger } from '../../generated/prisma/client';
+import { randomUUID } from 'node:crypto';
+import { CrawlJobType, RunStatus, RunTrigger } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CRAWL_QUEUE, type ICrawlQueue } from './crawl-queue.interface';
 
@@ -16,12 +18,16 @@ import { CRAWL_QUEUE, type ICrawlQueue } from './crawl-queue.interface';
 export class SchedulerService implements OnModuleInit {
   private readonly logger = new Logger(SchedulerService.name);
   private static readonly PREFIX = 'crawl-job:';
+  private readonly timezone: string;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly schedulerRegistry: SchedulerRegistry,
     @Inject(CRAWL_QUEUE) private readonly queue: ICrawlQueue,
-  ) {}
+    private readonly config: ConfigService,
+  ) {
+    this.timezone = this.config.get<string>('CRAWL_TIMEZONE', 'UTC');
+  }
 
   async onModuleInit(): Promise<void> {
     await this.reconcileAll();
@@ -63,26 +69,43 @@ export class SchedulerService implements OnModuleInit {
 
     let cronJob: CronJob;
     try {
-      cronJob = new CronJob(cronExpression, () => {
-        void this.trigger(jobId, label);
-      });
+      cronJob = new CronJob(
+        cronExpression,
+        () => {
+          void this.trigger(jobId, label);
+        },
+        null,
+        false,
+        // Without this the `cron` package uses the SERVER's local time, so a
+        // "daily 06:00" sweep on an ICT machine fires at 23:00 UTC the previous
+        // day and every capturedAt lands in the wrong day for a US price series.
+        // Also validated here: an invalid IANA name throws, and the catch below
+        // turns that into a skipped job rather than a dead boot.
+        this.timezone,
+      );
     } catch (err) {
-      // A malformed expression must not take the whole app down at boot.
+      // A malformed expression (or timezone) must not take the whole app down.
       this.logger.error(
-        `Job "${label}" has an invalid cron expression "${cronExpression}": ${(err as Error).message}`,
+        `Job "${label}" has an invalid cron expression "${cronExpression}" ` +
+          `or timezone "${this.timezone}": ${(err as Error).message}`,
       );
       return;
     }
 
     this.schedulerRegistry.addCronJob(name, cronJob);
     cronJob.start();
-    this.logger.log(`Scheduled "${label}" (${cronExpression})`);
+    this.logger.log(`Scheduled "${label}" (${cronExpression} ${this.timezone})`);
   }
 
   private async trigger(jobId: string, label: string): Promise<void> {
     try {
       // Skip if this job already has work outstanding. A slow hourly crawl that
       // takes 70 minutes must not stack up runs until the queue explodes.
+      //
+      // Works unchanged for a sweep, and that is the payoff of keeping one job per
+      // marketplace: all N of yesterday's keyword runs share this jobId, so
+      // "yesterday's Amazon sweep hasn't finished" correctly suppresses today's
+      // fire — while eBay, a different job, is untouched.
       const outstanding = await this.prisma.crawlRun.count({
         where: { jobId, status: { in: [RunStatus.QUEUED, RunStatus.RUNNING] } },
       });
@@ -91,12 +114,75 @@ export class SchedulerService implements OnModuleInit {
         return;
       }
 
-      const run = await this.prisma.crawlRun.create({
-        data: { jobId, status: RunStatus.QUEUED, trigger: RunTrigger.SCHEDULED },
-      });
-      await this.queue.enqueue(run.id);
+      const job = await this.prisma.crawlJob.findUnique({ where: { id: jobId } });
+      if (!job) {
+        this.logger.warn(`Skipping "${label}" — job no longer exists`);
+        return;
+      }
+
+      const runIds =
+        job.type === CrawlJobType.KEYWORD_SWEEP
+          ? await this.fanOut(jobId, label)
+          : [await this.createSingleRun(jobId)];
+
+      for (const runId of runIds) {
+        await this.queue.enqueue(runId);
+      }
     } catch (err) {
       this.logger.error(`Failed to trigger "${label}": ${(err as Error).message}`);
     }
+  }
+
+  /**
+   * One QUEUED run per enabled keyword, all sharing a batchId.
+   *
+   * This is where "a list of keywords, daily, on three sites" actually happens:
+   * the cron fires once per marketplace and expands against the keyword table, so
+   * adding a keyword changes tomorrow's output with no cron registration touched.
+   *
+   * createMany + re-read rather than N creates: MySQL cannot return rows from
+   * createMany, but one insert for 20 keywords beats 20 round-trips, and the
+   * batchId gives us a precise handle to read back.
+   */
+  private async fanOut(jobId: string, label: string): Promise<string[]> {
+    const keywords = await this.prisma.keyword.findMany({
+      where: { enabled: true },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+
+    if (keywords.length === 0) {
+      // Not an error: an empty keyword list is a configuration state, and a sweep
+      // with nothing to sweep should say so rather than look broken.
+      this.logger.warn(`"${label}" fired but no keywords are enabled — nothing to collect`);
+      return [];
+    }
+
+    const batchId = randomUUID();
+    await this.prisma.crawlRun.createMany({
+      data: keywords.map((k) => ({
+        jobId,
+        keywordId: k.id,
+        batchId,
+        status: RunStatus.QUEUED,
+        trigger: RunTrigger.SCHEDULED,
+      })),
+    });
+
+    const runs = await this.prisma.crawlRun.findMany({
+      where: { batchId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+
+    this.logger.log(`"${label}" fanned out to ${runs.length} keyword(s) — batch ${batchId}`);
+    return runs.map((r) => r.id);
+  }
+
+  private async createSingleRun(jobId: string): Promise<string> {
+    const run = await this.prisma.crawlRun.create({
+      data: { jobId, status: RunStatus.QUEUED, trigger: RunTrigger.SCHEDULED },
+    });
+    return run.id;
   }
 }

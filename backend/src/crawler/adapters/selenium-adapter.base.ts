@@ -100,6 +100,7 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
         `${this.marketplace} is ${Math.round(owed / 1000)}s into a cooldown from an earlier ` +
           `block — not knocking again yet.`,
         `owedMs=${owed} url=${url}`,
+        owed,
       );
     }
 
@@ -153,6 +154,8 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
       throw new BlockedError(
         `${this.marketplace} blocked the request: ${signal.reason}`,
         signal.evidence,
+        // Read AFTER recordBlock, so it reflects the wall we just took.
+        this.throttle.owedBackoffMsFor(url),
       );
     }
 

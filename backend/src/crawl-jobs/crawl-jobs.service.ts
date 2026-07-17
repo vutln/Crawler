@@ -28,7 +28,11 @@ import {
   type PaginatedCrawlRunsDto,
 } from './dto/crawl-job.dto';
 
-type RunWithJob = CrawlRun & { job: Pick<CrawlJob, 'name' | 'marketplace'> };
+type RunWithJob = CrawlRun & {
+  job: Pick<CrawlJob, 'name' | 'marketplace'>;
+  /** Optional so the lastRun lookups, which don't need it, keep type-checking. */
+  keyword?: { text: string } | null;
+};
 
 @Injectable()
 export class CrawlJobsService {
@@ -157,6 +161,8 @@ export class CrawlJobsService {
       ...(query.status && { status: query.status }),
       ...(query.jobId && { jobId: query.jobId }),
       ...(query.marketplace && { job: { marketplace: query.marketplace } }),
+      ...(query.keywordId && { keywordId: query.keywordId }),
+      ...(query.batchId && { batchId: query.batchId }),
     };
 
     const [items, total] = await Promise.all([
@@ -165,7 +171,10 @@ export class CrawlJobsService {
         orderBy: { createdAt: 'desc' },
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
-        include: { job: { select: { name: true, marketplace: true } } },
+        include: {
+          job: { select: { name: true, marketplace: true } },
+          keyword: { select: { text: true } },
+        },
       }),
       this.prisma.crawlRun.count({ where }),
     ]);
@@ -181,7 +190,12 @@ export class CrawlJobsService {
   async findRun(id: string): Promise<CrawlRunDto> {
     const run = await this.prisma.crawlRun.findUnique({
       where: { id },
-      include: { job: { select: { name: true, marketplace: true } } },
+      include: {
+        job: { select: { name: true, marketplace: true } },
+        // Without this the relation is simply absent and toRunDto reports
+        // keyword: null — indistinguishable from a run that has no keyword.
+        keyword: { select: { text: true } },
+      },
     });
     if (!run) throw new NotFoundException(`Crawl run ${id} not found`);
     return this.toRunDto(run);
@@ -235,6 +249,11 @@ export class CrawlJobsService {
       jobId: run.jobId,
       jobName: run.job.name,
       marketplace: run.job.marketplace,
+      // `?? null` twice on purpose: undefined means the caller didn't include the
+      // relation (the lastRun lookups don't), null means a run with no keyword.
+      // The DTO must not leak `undefined` into JSON, where the key would vanish.
+      keyword: run.keyword?.text ?? null,
+      batchId: run.batchId ?? null,
       status: run.status,
       trigger: run.trigger,
       startedAt: run.startedAt?.toISOString() ?? null,

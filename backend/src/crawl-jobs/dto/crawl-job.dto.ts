@@ -140,6 +140,16 @@ export class CrawlRunDto {
   @ApiProperty() jobId!: string;
   @ApiProperty({ description: 'Denormalized for display' }) jobName!: string;
   @ApiProperty({ enum: Marketplace, enumName: 'Marketplace' }) marketplace!: Marketplace;
+  /**
+   * The keyword this run collected. Null for legacy SEARCH/PRODUCT_URLS jobs,
+   * which take their term from the job itself.
+   */
+  @ApiProperty({ nullable: true, type: String }) keyword!: string | null;
+  /**
+   * Groups the runs one sweep produced. Without it a 20-keyword sweep is 20
+   * undifferentiated rows in a list paginated at 25.
+   */
+  @ApiProperty({ nullable: true, type: String }) batchId!: string | null;
   @ApiProperty({ enum: RunStatus, enumName: 'RunStatus' }) status!: RunStatus;
   @ApiProperty({ enum: RunTrigger, enumName: 'RunTrigger' }) trigger!: RunTrigger;
   @ApiProperty({ nullable: true, type: String, format: 'date-time' }) startedAt!: string | null;
@@ -189,4 +199,10 @@ export class ListCrawlRunsDto {
   marketplace?: Marketplace;
 
   @ApiPropertyOptional() @IsString() @IsOptional() jobId?: string;
+
+  /** "Show me every run that collected this keyword" — across all marketplaces. */
+  @ApiPropertyOptional() @IsString() @IsOptional() keywordId?: string;
+
+  /** "Show me one sweep" — the N runs a single cron fire produced. */
+  @ApiPropertyOptional() @IsString() @IsOptional() batchId?: string;
 }

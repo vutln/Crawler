@@ -3,7 +3,9 @@ import { createTestDriver } from '../fixtures/test-driver';
 import {
   APP_URL,
   CrawlJobsPage,
+  CrawlRunsPage,
   DashboardPage,
+  KeywordsPage,
   ProductDetailPage,
   ProductsPage,
   screenshot,
@@ -132,14 +134,57 @@ describe('Dashboard E2E', () => {
     }
   });
 
-  itIfUp('crawl jobs page lists definitions and runs', async () => {
+  itIfUp('crawl jobs page lists the sweep definitions', async () => {
     try {
       const page = new CrawlJobsPage(driver);
       await page.open();
       expect(await page.jobCount()).toBeGreaterThan(0);
-      expect(await page.runCount()).toBeGreaterThan(0);
     } catch (err) {
       await screenshot(driver, 'crawl-jobs-failure');
+      throw err;
+    }
+  });
+
+  itIfUp('keywords page lists the terms being collected', async () => {
+    try {
+      const page = new KeywordsPage(driver);
+      await page.open();
+      expect(await page.rowCount()).toBeGreaterThan(0);
+    } catch (err) {
+      await screenshot(driver, 'keywords-failure');
+      throw err;
+    }
+  });
+
+  /**
+   * The bulk-paste preview is the screen's whole value: it says what WILL happen
+   * before you commit. Normalization is what makes it right — "Mechanical KEYBOARD"
+   * must be recognised as the seeded "mechanical keyboard", not offered as new.
+   */
+  itIfUp('keyword paste preview recognises an existing term despite case and spacing', async () => {
+    try {
+      const page = new KeywordsPage(driver);
+      await page.open();
+      const summary = await page.previewPaste('Mechanical   KEYBOARD\nbrand new term');
+      expect(summary).toMatch(/1 to add/);
+      expect(summary).toMatch(/1 already tracked/);
+    } catch (err) {
+      await screenshot(driver, 'keyword-paste-failure');
+      throw err;
+    }
+  });
+
+  itIfUp('history page lists runs and takes its filters from the URL', async () => {
+    try {
+      const page = new CrawlRunsPage(driver);
+      await page.open();
+      expect(await page.rowCount()).toBeGreaterThan(0);
+
+      // A pasted link must apply — that is why the filters live in the URL.
+      await page.open('?status=BLOCKED');
+      expect(await page.statusFilter()).toBe('BLOCKED');
+    } catch (err) {
+      await screenshot(driver, 'crawl-runs-failure');
       throw err;
     }
   });

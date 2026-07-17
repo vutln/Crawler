@@ -1,0 +1,21 @@
+-- Drop Keyword.enabled.
+--
+-- DESTRUCTIVE BY INTENT, and safe here: every row is `true` — nothing in the UI
+-- ever set it false, and the sweep behaves identically without it.
+--
+-- Why: it was a THIRD way to express "don't collect this term", alongside
+-- deselecting the keyword on a job (CrawlJobKeyword) and deleting it outright.
+-- Three mechanisms for one intention is how a model stops being predictable — the
+-- same reason CrawlJob.query was removed.
+--
+-- It was also global in a way that quietly overrode the per-job selection: a job
+-- could explicitly select a keyword and still not collect it, a rule discoverable
+-- only by reading SchedulerService.
+--
+-- To stop collecting a term now: deselect it on the job, or delete the keyword.
+-- Deleting drops its ProductKeyword links but never the products or price history.
+--
+-- Recovery: re-adding a boolean column is a one-line migration. No data is lost
+-- that isn't reconstructible, because the column carried no information (all true).
+DROP INDEX `Keyword_enabled_idx` ON `keyword`;
+ALTER TABLE `keyword` DROP COLUMN `enabled`;

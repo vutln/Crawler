@@ -42,12 +42,12 @@ type RunWithJob = CrawlRun & {
  */
 const JOB_INCLUDE = {
   keywords: {
-    include: { keyword: { select: { id: true, text: true, enabled: true } } },
+    include: { keyword: { select: { id: true, text: true } } },
   },
 } as const;
 
 type JobWithKeywords = CrawlJob & {
-  keywords?: Array<{ keyword: { id: string; text: string; enabled: boolean } }>;
+  keywords?: Array<{ keyword: { id: string; text: string } }>;
 };
 
 @Injectable()

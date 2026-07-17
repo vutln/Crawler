@@ -14,7 +14,6 @@ import type {
   Product,
   ProductExportQuery,
   ProductListQuery,
-  RunKeywordResult,
   StatsOverview,
   UpdateCrawlJobInput,
   UpdateKeywordInput,
@@ -59,10 +58,6 @@ export const updateKeyword = (id: string, body: UpdateKeywordInput) =>
 
 export const deleteKeyword = (id: string) =>
   request<void>(`/keywords/${id}`, { method: 'DELETE' });
-
-/** Collect this one keyword now, across every enabled sweep. Replaced SEARCH jobs. */
-export const runKeyword = (id: string) =>
-  request<RunKeywordResult>(`/keywords/${id}/run`, { method: 'POST' });
 
 export const listCrawlJobs = (signal?: AbortSignal) =>
   request<CrawlJob[]>('/crawl-jobs', { signal });

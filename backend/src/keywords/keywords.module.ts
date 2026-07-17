@@ -1,18 +1,17 @@
 import { Module } from '@nestjs/common';
-import { CrawlerModule } from '../crawler/crawler.module';
 import { KeywordsController } from './keywords.controller';
 import { KeywordsService } from './keywords.service';
 
 /**
- * Keywords are plain data, so CRUD needs nothing but the @Global PrismaModule —
- * the scheduler PULLS Keyword rows at fan-out time rather than this module pushing
- * to it, which is what keeps adding a keyword free of cron churn.
+ * Self-contained: PrismaModule is @Global, and keywords are plain data.
  *
- * CrawlerModule is imported for one reason: runNow() enqueues ad-hoc runs, and
- * CRAWL_QUEUE lives there.
+ * It imported CrawlerModule while a per-keyword "run now" endpoint lived here and
+ * needed CRAWL_QUEUE. That endpoint is gone — triggering a crawl belongs to the job
+ * that knows which site and how deep — so the dependency went with it. The
+ * scheduler PULLS Keyword rows at fan-out time rather than this module pushing to
+ * it, which is what keeps adding a keyword free of cron churn.
  */
 @Module({
-  imports: [CrawlerModule],
   controllers: [KeywordsController],
   providers: [KeywordsService],
   exports: [KeywordsService],

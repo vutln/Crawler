@@ -2,10 +2,13 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { env } from '@/env';
 import { cn } from '@/lib/utils';
 
+/** Ordered by workflow: configure → schedule → read → audit. */
 const NAV = [
   { to: '/', label: 'Dashboard', end: true },
-  { to: '/products', label: 'Products', end: false },
+  { to: '/keywords', label: 'Keywords', end: false },
   { to: '/crawl-jobs', label: 'Crawl Jobs', end: false },
+  { to: '/products', label: 'Results', end: false },
+  { to: '/crawl-runs', label: 'History', end: false },
 ];
 
 export function Layout() {

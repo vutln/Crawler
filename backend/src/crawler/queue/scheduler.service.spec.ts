@@ -6,8 +6,8 @@ import type { ICrawlQueue } from './crawl-queue.interface';
 import { SchedulerService } from './scheduler.service';
 
 /**
- * The fan-out: one cron fire per marketplace expands into one run per enabled
- * keyword. This is where "a list of keywords, daily, on three sites" actually
+ * The fan-out: one cron fire per marketplace expands into one run per keyword that
+ * job tracks. This is where "a list of keywords, daily, on three sites" actually
  * happens, and it is the reason adding a keyword touches no cron registration.
  */
 describe('SchedulerService — KEYWORD_SWEEP fan-out', () => {
@@ -22,7 +22,7 @@ describe('SchedulerService — KEYWORD_SWEEP fan-out', () => {
   function make(opts: {
     jobType: CrawlJobType;
     /** `tracked` marks membership of the job's explicit selection. */
-    keywords?: Array<{ id: string; enabled: boolean; tracked?: boolean }>;
+    keywords?: Array<{ id: string; tracked?: boolean }>;
     outstanding?: number;
     trackAllKeywords?: boolean;
   }) {
@@ -30,11 +30,10 @@ describe('SchedulerService — KEYWORD_SWEEP fan-out', () => {
     const enqueued: string[] = [];
     const trackAll = opts.trackAllKeywords ?? true;
 
-    // Mirrors the real WHERE: enabled is an AND in BOTH modes, and the job's
-    // selection narrows it only when trackAllKeywords is false.
-    const selected = (opts.keywords ?? []).filter(
-      (k) => k.enabled && (trackAll || k.tracked === true),
-    );
+    // Mirrors the real WHERE: the job's selection is the ONLY filter. There used to
+    // be a global Keyword.enabled AND-condition here that could veto a job's
+    // explicit pick; it's gone, so what a job collects is readable from the job.
+    const selected = (opts.keywords ?? []).filter((k) => trackAll || k.tracked === true);
 
     const prisma = {
       crawlRun: {
@@ -77,16 +76,10 @@ describe('SchedulerService — KEYWORD_SWEEP fan-out', () => {
     return { trigger, created, enqueued };
   }
 
-  it('creates one run per ENABLED keyword, all sharing a batch', async () => {
+  it('creates one run per keyword, all sharing a batch', async () => {
     const { trigger, created, enqueued } = make({
       jobType: CrawlJobType.KEYWORD_SWEEP,
-      keywords: [
-        { id: 'k1', enabled: true },
-        { id: 'k2', enabled: true },
-        // Disabled keywords stay in the list but are skipped — that is what the
-        // enabled flag is for, and why disabling beats deleting.
-        { id: 'k3', enabled: false },
-      ],
+      keywords: [{ id: 'k1' }, { id: 'k2' }],
     });
 
     await trigger('job_1', 'Amazon sweep');
@@ -108,7 +101,7 @@ describe('SchedulerService — KEYWORD_SWEEP fan-out', () => {
   it('gives each fire its own batch id', async () => {
     const { trigger, created } = make({
       jobType: CrawlJobType.KEYWORD_SWEEP,
-      keywords: [{ id: 'k1', enabled: true }],
+      keywords: [{ id: 'k1' }],
     });
 
     await trigger('job_1', 'Amazon sweep');
@@ -123,14 +116,14 @@ describe('SchedulerService — KEYWORD_SWEEP fan-out', () => {
      * join table: "collect everything, including keywords added later" is a real
      * intention that an empty selection cannot express.
      */
-    it('collects every enabled keyword when trackAllKeywords is true', async () => {
+    it('collects every keyword when trackAllKeywords is true', async () => {
       const { trigger, created } = make({
         jobType: CrawlJobType.KEYWORD_SWEEP,
         trackAllKeywords: true,
         keywords: [
-          { id: 'k1', enabled: true },
+          { id: 'k1' },
           // Not in the job's selection, and irrelevant — track-all ignores it.
-          { id: 'k2', enabled: true, tracked: false },
+          { id: 'k2', tracked: false },
         ],
       });
 
@@ -143,9 +136,9 @@ describe('SchedulerService — KEYWORD_SWEEP fan-out', () => {
         jobType: CrawlJobType.KEYWORD_SWEEP,
         trackAllKeywords: false,
         keywords: [
-          { id: 'k1', enabled: true, tracked: true },
-          { id: 'k2', enabled: true, tracked: false },
-          { id: 'k3', enabled: true, tracked: true },
+          { id: 'k1', tracked: true },
+          { id: 'k2', tracked: false },
+          { id: 'k3', tracked: true },
         ],
       });
 
@@ -153,30 +146,17 @@ describe('SchedulerService — KEYWORD_SWEEP fan-out', () => {
       expect(created.map((r) => r.keywordId)).toEqual(['k1', 'k3']);
     });
 
-    /**
-     * Keyword.enabled is the GLOBAL master switch — "stop collecting this term
-     * anywhere". A job selecting it explicitly must not override that, or disabling
-     * a keyword would appear to work while a job quietly kept crawling it.
-     */
-    it('still skips a disabled keyword the job explicitly selected', async () => {
-      const { trigger, created } = make({
-        jobType: CrawlJobType.KEYWORD_SWEEP,
-        trackAllKeywords: false,
-        keywords: [
-          { id: 'k1', enabled: false, tracked: true },
-          { id: 'k2', enabled: true, tracked: true },
-        ],
-      });
-
-      await trigger('job_1', 'Amazon sweep');
-      expect(created.map((r) => r.keywordId)).toEqual(['k2']);
-    });
+    // A test asserting that a global Keyword.enabled flag could veto a job's
+    // explicit selection lived here. That flag is gone: it was a third way to say
+    // "don't collect this" (alongside deselecting and deleting), and it made a
+    // job's own configuration a lie — you could select a keyword and silently not
+    // collect it. What a job collects is now readable from the job alone.
 
     it('does nothing when the job selects nothing', async () => {
       const { trigger, created, enqueued } = make({
         jobType: CrawlJobType.KEYWORD_SWEEP,
         trackAllKeywords: false,
-        keywords: [{ id: 'k1', enabled: true, tracked: false }],
+        keywords: [{ id: 'k1', tracked: false }],
       });
 
       await trigger('job_1', 'Amazon sweep');
@@ -186,10 +166,10 @@ describe('SchedulerService — KEYWORD_SWEEP fan-out', () => {
   });
 
   /** An empty keyword list is a config state, not a crash. */
-  it('does nothing when no keywords are enabled', async () => {
+  it('does nothing when there are no keywords at all', async () => {
     const { trigger, created, enqueued } = make({
       jobType: CrawlJobType.KEYWORD_SWEEP,
-      keywords: [{ id: 'k1', enabled: false }],
+      keywords: [],
     });
 
     await trigger('job_1', 'Amazon sweep');
@@ -206,7 +186,7 @@ describe('SchedulerService — KEYWORD_SWEEP fan-out', () => {
   it('skips the whole fire when the previous sweep is still running', async () => {
     const { trigger, created, enqueued } = make({
       jobType: CrawlJobType.KEYWORD_SWEEP,
-      keywords: [{ id: 'k1', enabled: true }],
+      keywords: [{ id: 'k1' }],
       outstanding: 3,
     });
 
@@ -224,7 +204,7 @@ describe('SchedulerService — KEYWORD_SWEEP fan-out', () => {
   it('creates a single keyword-less run for a PRODUCT_URLS job', async () => {
     const { trigger, created, enqueued } = make({
       jobType: CrawlJobType.PRODUCT_URLS,
-      keywords: [{ id: 'k1', enabled: true }],
+      keywords: [{ id: 'k1' }],
     });
 
     await trigger('job_1', 'URL recheck');

@@ -26,7 +26,7 @@ enum Marketplace {
 }
 
 enum CrawlJobType {
-  /// Fans out over every enabled Keyword — see the CrawlJob doc comment.
+  /// Fans out over the keywords the job tracks — see the CrawlJob doc comment.
   KEYWORD_SWEEP
   /// Re-checks a fixed list of product URLs. Takes `urls`, never a search term.
   PRODUCT_URLS
@@ -58,19 +58,17 @@ enum RunTrigger {
   SCHEDULED
 }
 
-/// A search term tracked across every marketplace.
+/// A search term. Which sweeps collect it is decided per job — see CrawlJobKeyword.
 ///
-/// This model IS the keyword-configuration screen. Deliberately a flat global
-/// list rather than per-job: the requirement is "these keywords, on all three
-/// sites, daily", so the sites are the jobs and the keywords are data. Adding a
-/// keyword therefore causes no cron churn at all — see CrawlJob.
+/// This model IS the keyword-configuration screen. A flat global list, with the
+/// per-job selection held in CrawlJobKeyword: the sites are the jobs and the
+/// keywords are data, so adding one causes no cron churn at all.
 model Keyword {
-  id      String  @id @default(cuid())
+  id    String  @id @default(cuid())
   /// Normalized to lower+trim by KeywordsService before write; the unique index
   /// is only meaningful if every caller does that, so no one may write it raw.
-  text    String  @unique @db.VarChar(191)
-  enabled Boolean @default(true)
-  notes   String? @db.Text
+  text  String  @unique @db.VarChar(191)
+  notes String? @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
@@ -78,10 +76,18 @@ model Keyword {
   runs     CrawlRun[]
   products ProductKeyword[]
   jobs     CrawlJobKeyword[]
-
-  /// Matches SchedulerService's fan-out query: WHERE enabled = true
-  @@index([enabled])
 }
+
+// There is deliberately no `enabled` flag.
+//
+// It was a third way to say "don't collect this", alongside deselecting the
+// keyword on a job (CrawlJobKeyword) and deleting it outright — and three
+// mechanisms for one intention is how a model stops being predictable. Worse, it
+// was global: a job could explicitly select a keyword and still silently not
+// collect it, which is a rule you can only learn by reading the scheduler.
+//
+// To stop collecting a term: deselect it on the job, or delete it. Deleting drops
+// its ProductKeyword links but never the products or their price history.
 
 /// Which keywords a specific sweep collects — only consulted when the job has
 /// trackAllKeywords = false. See CrawlJob.
@@ -218,7 +224,7 @@ model CrawlJob {
   /// string[] for PRODUCT_URLS jobs
   urls           Json?
 
-  /// true  = collect every enabled Keyword, including ones added later.
+  /// true  = collect every Keyword, including ones added later.
   /// false = collect only the keywords in `keywords` below.
   ///
   /// An explicit flag rather than inferring "no rows means all", because those two

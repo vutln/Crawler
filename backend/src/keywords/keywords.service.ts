@@ -1,27 +1,17 @@
 import {
   BadRequestException,
   ConflictException,
-  Inject,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
-import {
-  CrawlJobType,
-  Marketplace,
-  RunStatus,
-  RunTrigger,
-  type Keyword,
-} from '../generated/prisma/client';
-import { CRAWL_QUEUE, type ICrawlQueue } from '../crawler/queue/crawl-queue.interface';
+import { type Keyword } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   BulkCreateKeywordsDto,
   BulkCreateKeywordsResultDto,
   CreateKeywordDto,
   KeywordDto,
-  RunKeywordResultDto,
   UpdateKeywordDto,
 } from './dto/keyword.dto';
 
@@ -40,10 +30,7 @@ type KeywordWithCount = Keyword & { _count?: { products: number } };
 export class KeywordsService {
   private readonly logger = new Logger(KeywordsService.name);
 
-  constructor(
-    private readonly prisma: PrismaService,
-    @Inject(CRAWL_QUEUE) private readonly queue: ICrawlQueue,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   /**
    * The single definition of keyword identity. Every write goes through this.
@@ -95,7 +82,7 @@ export class KeywordsService {
     }
 
     const keyword = await this.prisma.keyword.create({
-      data: { text, enabled: dto.enabled ?? true, notes: dto.notes ?? null },
+      data: { text, notes: dto.notes ?? null },
       include: { _count: { select: { products: true } } },
     });
     return this.toDto(keyword);
@@ -171,84 +158,6 @@ export class KeywordsService {
     return { created: created.map((k) => this.toDto(k)), skipped, duplicates };
   }
 
-  /**
-   * Collect ONE keyword right now, across every enabled sweep.
-   *
-   * This is what replaced the old SEARCH job type. SEARCH existed to answer "just
-   * try this one term", but it did so by holding its own query — producing runs
-   * with no keywordId and products no keyword pointed at, invisible to the results
-   * screen. This gives the same capability inside the keyword model: the run
-   * carries the keywordId like any sweep run, so its products are linked exactly
-   * the same way. There is now one way to express "collect this term".
-   *
-   * Deliberately reuses the existing KEYWORD_SWEEP jobs rather than creating a
-   * throwaway job: the sweep IS the per-marketplace plan (adapter, maxPages, cron),
-   * and a parallel ad-hoc job would be a second place for that config to drift.
-   */
-  async runNow(id: string): Promise<RunKeywordResultDto> {
-    const keyword = await this.prisma.keyword.findUnique({ where: { id } });
-    if (!keyword) throw new NotFoundException(`Keyword ${id} not found`);
-
-    /**
-     * Only sweeps that actually TRACK this keyword.
-     *
-     * Running it on a job that excluded it would quietly contradict the operator's
-     * configuration — they said "not this term on Etsy", and an ad-hoc trigger is
-     * not a licence to override that. A job either tracks everything, or tracks
-     * this keyword explicitly.
-     */
-    const sweeps = await this.prisma.crawlJob.findMany({
-      where: {
-        type: CrawlJobType.KEYWORD_SWEEP,
-        enabled: true,
-        OR: [{ trackAllKeywords: true }, { keywords: { some: { keywordId: id } } }],
-      },
-      orderBy: { marketplace: 'asc' },
-    });
-    if (sweeps.length === 0) {
-      throw new BadRequestException(
-        `No enabled sweep tracks "${keyword.text}", so there is nothing to run it against. ` +
-          `Add it to a sweep's keywords, or set that sweep to track all keywords.`,
-      );
-    }
-
-    const batchId = randomUUID();
-    const queued: Marketplace[] = [];
-    const skipped: string[] = [];
-
-    for (const job of sweeps) {
-      // Same guard the scheduler uses: a sweep with work outstanding must not have
-      // more piled on. Per-marketplace, so a walled Amazon doesn't block eBay.
-      const outstanding = await this.prisma.crawlRun.count({
-        where: { jobId: job.id, status: { in: [RunStatus.QUEUED, RunStatus.RUNNING] } },
-      });
-      if (outstanding > 0) {
-        skipped.push(job.marketplace);
-        continue;
-      }
-
-      const run = await this.prisma.crawlRun.create({
-        data: {
-          jobId: job.id,
-          keywordId: keyword.id,
-          batchId,
-          status: RunStatus.QUEUED,
-          // MANUAL, not SCHEDULED: a human asked for this one.
-          trigger: RunTrigger.MANUAL,
-        },
-      });
-      await this.queue.enqueue(run.id);
-      queued.push(job.marketplace);
-    }
-
-    this.logger.log(
-      `Ad-hoc run of "${keyword.text}": queued on ${queued.join(', ') || 'nothing'}` +
-        `${skipped.length ? `; skipped ${skipped.join(', ')} (busy)` : ''}`,
-    );
-
-    return { batchId, marketplaces: queued, queued: queued.length, skipped };
-  }
-
   async update(id: string, dto: UpdateKeywordDto): Promise<KeywordDto> {
     await this.assertExists(id);
 
@@ -266,7 +175,6 @@ export class KeywordsService {
       where: { id },
       data: {
         ...(text !== undefined && { text }),
-        ...(dto.enabled !== undefined && { enabled: dto.enabled }),
         ...(dto.notes !== undefined && { notes: dto.notes }),
       },
       include: { _count: { select: { products: true } } },
@@ -280,8 +188,8 @@ export class KeywordsService {
    * outlive the reason we went looking. CrawlRun.keywordId is SetNull, so past
    * runs survive as history with their term detached.
    *
-   * Disabling is usually what the operator actually wants — it stops the sweep
-   * while keeping the link data intact — which is why `enabled` exists.
+   * To stop collecting a term WITHOUT losing its links, deselect it on the job
+   * instead — that is the narrower tool, and why there is no per-keyword pause.
    */
   async remove(id: string): Promise<void> {
     await this.assertExists(id);
@@ -297,7 +205,6 @@ export class KeywordsService {
     return {
       id: keyword.id,
       text: keyword.text,
-      enabled: keyword.enabled,
       notes: keyword.notes,
       createdAt: keyword.createdAt.toISOString(),
       productCount: keyword._count?.products ?? 0,

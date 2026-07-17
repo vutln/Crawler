@@ -25,7 +25,6 @@ export type Keyword = components['schemas']['KeywordDto'];
 export type CreateKeywordInput = components['schemas']['CreateKeywordDto'];
 export type UpdateKeywordInput = components['schemas']['UpdateKeywordDto'];
 export type BulkCreateKeywordsResult = components['schemas']['BulkCreateKeywordsResultDto'];
-export type RunKeywordResult = components['schemas']['RunKeywordResultDto'];
 export type StatsOverview = components['schemas']['StatsOverviewDto'];
 export type MarketplaceStat = components['schemas']['MarketplaceStatDto'];
 

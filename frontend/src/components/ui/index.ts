@@ -15,6 +15,7 @@ export { Modal } from './Modal';
 export { Select } from './Select';
 export { Spinner } from './Spinner';
 export { StatTile } from './StatTile';
+export { Thumbnail } from './Thumbnail';
 
 // Badges — each a pure lookup into a src/domain registry.
 export { JobStatusBadge } from './JobStatusBadge';

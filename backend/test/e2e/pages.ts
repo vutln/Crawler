@@ -105,8 +105,50 @@ export class CrawlJobsPage extends BasePage {
     return this.countOf('job-row');
   }
 
-  async runCount(): Promise<number> {
+  // runCount() lived here until the runs table moved to its own route — see
+  // CrawlRunsPage. A sweep emits one run per keyword per site per day, which is far
+  // too much to sit under a three-row job list.
+}
+
+/** The keyword list — the feature's input. */
+export class KeywordsPage extends BasePage {
+  async open(): Promise<void> {
+    await this.driver.get(`${APP_URL}/keywords`);
+    // Wait for a ROW, not the table shell: the skeleton renders inside the same
+    // table, so waiting on 'keywords-table' returns before any data has arrived.
+    await this.waitFor('keyword-row');
+  }
+
+  async rowCount(): Promise<number> {
+    return this.countOf('keyword-row');
+  }
+
+  /** Types into the bulk-paste box and returns the live preview summary. */
+  async previewPaste(text: string): Promise<string> {
+    const box = await this.driver.findElement(this.byTestId('keyword-paste'));
+    await box.clear();
+    await box.sendKeys(text);
+    await this.driver.sleep(300);
+    const el = await this.driver.findElement(this.byTestId('keyword-summary'));
+    return el.getText();
+  }
+}
+
+/** Collection history. */
+export class CrawlRunsPage extends BasePage {
+  async open(query = ''): Promise<void> {
+    await this.driver.get(`${APP_URL}/crawl-runs${query}`);
+    await this.waitFor('filter-status');
+  }
+
+  async rowCount(): Promise<number> {
     return this.countOf('run-row');
+  }
+
+  /** The URL is the filter store, so this reads what a shared link would apply. */
+  async statusFilter(): Promise<string> {
+    const el = await this.driver.findElement(this.byTestId('filter-status'));
+    return (await el.getAttribute('value')) ?? '';
   }
 }
 

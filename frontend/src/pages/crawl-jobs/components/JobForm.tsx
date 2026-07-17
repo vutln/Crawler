@@ -168,10 +168,6 @@ export function JobForm({ job, onDone }: { job?: CrawlJob; onDone: () => void })
                   data-testid="keyword-option"
                 />
                 <span>{k.text}</span>
-                {/* A disabled keyword is skipped even when selected — enabled is the
-                    global master switch. Saying so here prevents "I ticked it, why
-                    isn't it collecting?" */}
-                {!k.enabled && <span className="text-[10px] text-amber-600">(disabled)</span>}
               </label>
             ))}
           </div>

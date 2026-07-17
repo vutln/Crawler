@@ -14,10 +14,10 @@ export function JobsTable() {
   const [editing, setEditing] = useState<string | null>(null);
   const editingJob = jobs.data?.find((j) => j.id === editing) ?? null;
 
-  // What a sweep will actually collect. Undefined while loading — the cell falls
-  // back to prose rather than flashing a wrong count.
+  // What a track-all sweep will collect: every keyword there is. Undefined while
+  // loading, so the cell omits the number rather than flashing a wrong one.
   const keywords = useKeywords();
-  const enabledKeywords = keywords.data?.filter((k) => k.enabled).length;
+  const keywordCount = keywords.data?.length;
 
   return (
     <Card>
@@ -77,8 +77,8 @@ export function JobsTable() {
                     ) : job.trackAllKeywords ? (
                       <span title="Keywords added later are collected automatically">
                         All keywords
-                        {enabledKeywords !== undefined && (
-                          <span className="text-slate-400"> ({enabledKeywords})</span>
+                        {keywordCount !== undefined && (
+                          <span className="text-slate-400"> ({keywordCount})</span>
                         )}
                         <span className="text-slate-400"> · {job.maxPages}p each</span>
                       </span>

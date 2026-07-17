@@ -8,6 +8,12 @@ export interface ProductFilters {
   pageSize: number;
   search: string;
   marketplace?: Marketplace;
+  /**
+   * Only products this keyword surfaced. No guard function (unlike isMarketplace):
+   * it's a server-side id, so an unknown value matches nothing and the list is
+   * simply empty — which degrades better than a 400 on a hand-edited URL.
+   */
+  keywordId?: string;
   minPrice?: number;
   maxPrice?: number;
   inStock?: boolean;
@@ -45,6 +51,7 @@ export function useProductsQueryParams() {
       pageSize: intParam(searchParams.get('pageSize'), 25),
       search: searchParams.get('search') ?? '',
       marketplace: isMarketplace(marketplace) ? marketplace : undefined,
+      keywordId: searchParams.get('keywordId') ?? undefined,
       minPrice: floatParam(searchParams.get('minPrice')),
       maxPrice: floatParam(searchParams.get('maxPrice')),
       inStock: inStock === 'true' ? true : inStock === 'false' ? false : undefined,
@@ -91,6 +98,7 @@ export function useProductsQueryParams() {
       pageSize: filters.pageSize,
       ...(filters.search && { search: filters.search }),
       ...(filters.marketplace && { marketplace: filters.marketplace }),
+      ...(filters.keywordId && { keywordId: filters.keywordId }),
       ...(filters.minPrice !== undefined && { minPrice: filters.minPrice }),
       ...(filters.maxPrice !== undefined && { maxPrice: filters.maxPrice }),
       ...(filters.inStock !== undefined && { inStock: filters.inStock }),
@@ -103,6 +111,10 @@ export function useProductsQueryParams() {
   const hasActiveFilters =
     Boolean(filters.search) ||
     filters.marketplace !== undefined ||
+    // Load-bearing: arriving from a keyword deep-link with no matches would
+    // otherwise show "No products collected yet — go run a crawl" and no way to
+    // clear, rather than "nothing matches this filter".
+    filters.keywordId !== undefined ||
     filters.minPrice !== undefined ||
     filters.maxPrice !== undefined ||
     filters.inStock !== undefined;

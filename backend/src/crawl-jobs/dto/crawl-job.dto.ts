@@ -45,7 +45,7 @@ export class CreateCrawlJobDto {
   @ApiPropertyOptional({
     default: true,
     description:
-      'true = collect every enabled keyword, including ones added later. ' +
+      'true = collect every keyword, including ones added later. ' +
       'false = collect only `keywordIds`.',
   })
   @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
@@ -148,8 +148,6 @@ export class UpdateCrawlJobDto {
 export class KeywordRefDto {
   @ApiProperty() id!: string;
   @ApiProperty() text!: string;
-  @ApiProperty({ description: 'A disabled keyword is skipped even if this job selects it.' })
-  enabled!: boolean;
 }
 
 // See ProductDto for why these are @ApiProperty({nullable:true}) and not
@@ -160,7 +158,7 @@ export class CrawlJobDto {
   @ApiProperty({ enum: Marketplace, enumName: 'Marketplace' }) marketplace!: Marketplace;
   @ApiProperty({ enum: CrawlJobType, enumName: 'CrawlJobType' }) type!: CrawlJobType;
   @ApiProperty({ type: [String], nullable: true }) urls!: string[] | null;
-  @ApiProperty({ description: 'true = every enabled keyword, including future ones' })
+  @ApiProperty({ description: 'true = every keyword, including ones added later' })
   trackAllKeywords!: boolean;
   /**
    * The job's explicit selection. EMPTY when trackAllKeywords is true — read the

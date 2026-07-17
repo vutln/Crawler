@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { PriceDelta, SiteBadge, SkeletonRows } from '@/components/ui';
+import { PriceDelta, SiteBadge, SkeletonRows, Thumbnail } from '@/components/ui';
 import { cn, formatCurrency, formatNumber, formatRelative } from '@/lib/utils';
 import type { Product, ProductSortBy, SortOrder } from '@/types/api';
 
@@ -65,14 +65,24 @@ export function ProductsTable({
                 data-testid="product-row"
               >
                 <td className="max-w-md px-3 py-1.5">
-                  <Link
-                    to={`/products/${p.id}`}
-                    className="block truncate font-medium text-slate-800 hover:text-blue-600"
-                    title={p.title}
-                  >
-                    {p.title}
-                  </Link>
-                  {p.brand && <span className="text-[11px] text-slate-400">{p.brand}</span>}
+                  {/*
+                    imageUrl has been collected since the first crawl and rendered
+                    nowhere — it is one of the four required fields. Thumbnail is
+                    fixed-size so adding it cannot reflow the table.
+                  */}
+                  <div className="flex items-center gap-2">
+                    <Thumbnail src={p.imageUrl} alt="" />
+                    <div className="min-w-0">
+                      <Link
+                        to={`/products/${p.id}`}
+                        className="block truncate font-medium text-slate-800 hover:text-blue-600"
+                        title={p.title}
+                      >
+                        {p.title}
+                      </Link>
+                      {p.brand && <span className="text-[11px] text-slate-400">{p.brand}</span>}
+                    </div>
+                  </div>
                 </td>
                 <td className="px-3 py-1.5">
                   <SiteBadge marketplace={p.marketplace} />

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button, Card, Input, Select } from '@/components/ui';
+import { useKeywords } from '@/hooks/useKeywords';
 import { MARKETPLACE_OPTIONS } from '@/domain/marketplace';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import type { ProductFilters } from '@/hooks/useProductsQueryParams';
@@ -24,6 +25,7 @@ export function ProductsFilterBar({
   isRefreshing: boolean;
 }) {
   // Local mirror so typing feels instant while the URL updates on a debounce.
+  const keywords = useKeywords();
   const [searchInput, setSearchInput] = useState(filters.search);
   const debouncedSearch = useDebouncedValue(searchInput, 300);
 
@@ -57,6 +59,19 @@ export function ProductsFilterBar({
         placeholder="All sites"
         options={MARKETPLACE_OPTIONS}
         testId="marketplace-filter"
+      />
+
+      {/*
+        Options come from a live query, not a src/domain registry: keywords are
+        runtime rows, and a Record<Keyword, Meta> would be a hand-maintained cache
+        of the database — exactly what that folder's exhaustiveness contract is not.
+      */}
+      <Select<string>
+        value={filters.keywordId ?? ''}
+        onChange={(v) => onChange({ keywordId: v })}
+        placeholder="All keywords"
+        options={(keywords.data ?? []).map((k) => ({ value: k.id, label: k.text }))}
+        testId="keyword-filter"
       />
 
       <Input

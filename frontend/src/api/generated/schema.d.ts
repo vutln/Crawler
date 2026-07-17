@@ -119,26 +119,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/keywords/{id}/run": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Collect this one keyword now, across every enabled sweep
-         * @description Queues one run per marketplace and returns immediately — poll /crawl-runs, or filter them by the returned batchId. A marketplace whose sweep already has work outstanding is skipped rather than piled onto, and reported in `skipped`. Runs carry this keywordId, so what they collect is linked exactly as the daily sweep would link it.
-         */
-        post: operations["KeywordsController_runNow"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/keywords/{id}": {
         parameters: {
             query?: never;
@@ -358,7 +338,6 @@ export interface components {
         KeywordDto: {
             id: string;
             text: string;
-            enabled: boolean;
             notes: string | null;
             createdAt: string;
             /** @description How many products this keyword has surfaced, across every marketplace. */
@@ -367,11 +346,6 @@ export interface components {
         CreateKeywordDto: {
             /** @example mechanical keyboard */
             text: string;
-            /**
-             * @description Disabled keywords stay in the list but are skipped by the daily sweep.
-             * @default true
-             */
-            enabled: boolean;
             notes?: string | null;
         };
         BulkCreateKeywordsDto: {
@@ -392,18 +366,8 @@ export interface components {
             /** @description Terms that collapsed to a duplicate of another term in the same paste. */
             duplicates: string[];
         };
-        RunKeywordResultDto: {
-            /** @description Groups the runs this trigger produced. */
-            batchId: string;
-            marketplaces: components["schemas"]["Marketplace"][];
-            /** @description One run per marketplace that had capacity. */
-            queued: number;
-            /** @description Marketplaces skipped because that sweep already had work outstanding. */
-            skipped: string[];
-        };
         UpdateKeywordDto: {
             text?: string;
-            enabled?: boolean;
             notes?: string | null;
         };
         /** @enum {string} */
@@ -738,27 +702,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BulkCreateKeywordsResultDto"];
-                };
-            };
-        };
-    };
-    KeywordsController_runNow: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RunKeywordResultDto"];
                 };
             };
         };

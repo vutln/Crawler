@@ -28,15 +28,6 @@ export class CreateKeywordDto {
   @MaxLength(MAX_KEYWORD_LENGTH)
   text!: string;
 
-  @ApiPropertyOptional({
-    default: true,
-    description: 'Disabled keywords stay in the list but are skipped by the daily sweep.',
-  })
-  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
-  @IsBoolean()
-  @IsOptional()
-  enabled?: boolean;
-
   @ApiPropertyOptional({ nullable: true })
   @IsString()
   @IsOptional()
@@ -71,7 +62,6 @@ export class BulkCreateKeywordsDto {
 export class KeywordDto {
   @ApiProperty() id!: string;
   @ApiProperty() text!: string;
-  @ApiProperty() enabled!: boolean;
   @ApiProperty({ nullable: true, type: String }) notes!: string | null;
   @ApiProperty() createdAt!: string;
   /** How many products this keyword has surfaced, across every marketplace. */
@@ -86,31 +76,10 @@ export class UpdateKeywordDto {
   @IsOptional()
   text?: string;
 
-  @ApiPropertyOptional()
-  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
-  @IsBoolean()
-  @IsOptional()
-  enabled?: boolean;
-
   @ApiPropertyOptional({ nullable: true })
   @IsString()
   @IsOptional()
   notes?: string | null;
-}
-
-/** What an ad-hoc "run this keyword now" actually queued. */
-export class RunKeywordResultDto {
-  @ApiProperty({ description: 'Groups the runs this trigger produced.' })
-  batchId!: string;
-  @ApiProperty({ type: [String], enum: Marketplace, enumName: 'Marketplace' })
-  marketplaces!: Marketplace[];
-  @ApiProperty({ description: 'One run per marketplace that had capacity.' })
-  queued!: number;
-  @ApiProperty({
-    type: [String],
-    description: 'Marketplaces skipped because that sweep already had work outstanding.',
-  })
-  skipped!: string[];
 }
 
 /** What a paste actually did. `skipped` is expected, not an error — see BulkCreateKeywordsDto. */

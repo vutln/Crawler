@@ -4,7 +4,9 @@ import { Layout } from '@/components/Layout';
 import { Spinner } from '@/components/ui';
 import DashboardPage from '@/pages/dashboard';
 import ProductsPage from '@/pages/products';
+import KeywordsPage from '@/pages/keywords';
 import CrawlJobsPage from '@/pages/crawl-jobs';
+import CrawlRunsPage from '@/pages/crawl-runs';
 
 const ProductDetailPage = lazy(() => import('@/pages/product-detail'));
 
@@ -28,7 +30,9 @@ export default function App() {
             </Suspense>
           }
         />
+        <Route path="keywords" element={<KeywordsPage />} />
         <Route path="crawl-jobs" element={<CrawlJobsPage />} />
+        <Route path="crawl-runs" element={<CrawlRunsPage />} />
         <Route
           path="*"
           element={<p className="py-16 text-center text-sm text-slate-500">Page not found</p>}

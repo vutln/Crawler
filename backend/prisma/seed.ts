@@ -126,6 +126,25 @@ const PRODUCTS: SeedProduct[] = [
 ];
 
 /**
+ * A self-contained thumbnail for demo rows.
+ *
+ * A data: URI, not a hot-linked marketplace CDN URL: the seed must work offline and
+ * still work next year. Real crawls store real CDN urls; those 403 and expire,
+ * which is exactly why Thumbnail has an onError fallback.
+ *
+ * Deterministic hue from the title, so a reseed doesn't reshuffle the colours.
+ */
+function placeholderImage(title: string): string {
+  const hue = [...title].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">` +
+    `<rect width="64" height="64" fill="hsl(${hue} 60% 88%)"/>` +
+    `<text x="32" y="41" font-family="sans-serif" font-size="26" fill="hsl(${hue} 45% 35%)" ` +
+    `text-anchor="middle">${title.trim()[0].toUpperCase()}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+/**
  * Deterministic pseudo-random. Math.random() would make every reseed produce a
  * different chart, which makes "did my change break the chart?" unanswerable.
  */
@@ -171,7 +190,7 @@ async function main(): Promise<void> {
   // The keyword list — this is what the config screen edits.
   const keywords = await Promise.all(
     ['mechanical keyboard', 'vintage film camera', 'handmade ceramic mug'].map((text) =>
-      prisma.keyword.create({ data: { text, enabled: true } }),
+      prisma.keyword.create({ data: { text } }),
     ),
   );
   console.log(`  ${keywords.length} keywords`);
@@ -276,7 +295,7 @@ async function main(): Promise<void> {
         title: spec.title,
         brand: spec.brand,
         seller: spec.seller,
-        imageUrl: null,
+        imageUrl: placeholderImage(spec.title),
         currency: spec.currency,
         rating: spec.rating,
         reviewCount: spec.reviewCount,

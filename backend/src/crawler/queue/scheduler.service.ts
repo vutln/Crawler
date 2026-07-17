@@ -146,19 +146,19 @@ export class SchedulerService implements OnModuleInit {
    */
   private async fanOut(job: CrawlJob, label: string): Promise<string[]> {
     /**
-     * `enabled` is an AND in BOTH modes, not just the track-all one.
+     * The job's selection is the ONLY thing that decides what it collects.
      *
-     * Keyword.enabled is the global master switch — "stop collecting this term
-     * anywhere". A job explicitly selecting a keyword must not override that, or
-     * disabling would appear to work while a job quietly kept crawling it.
+     * There used to be an `enabled` AND-condition here — a global per-keyword flag
+     * that could veto a job's explicit selection, so a job could select a keyword
+     * and silently not collect it. It's gone: what a job collects is now readable
+     * from the job alone.
      */
     const keywords = await this.prisma.keyword.findMany({
-      where: {
-        enabled: true,
-        // trackAllKeywords is the whole point of the flag: it means "everything,
-        // including keywords added after this job was configured".
-        ...(job.trackAllKeywords ? {} : { jobs: { some: { jobId: job.id } } }),
-      },
+      where: job.trackAllKeywords
+        ? // The whole point of the flag: everything, including keywords added after
+          // this job was configured.
+          {}
+        : { jobs: { some: { jobId: job.id } } },
       orderBy: { createdAt: 'asc' },
       select: { id: true },
     });
@@ -169,8 +169,8 @@ export class SchedulerService implements OnModuleInit {
       // different fixes, so name which one it is.
       this.logger.warn(
         job.trackAllKeywords
-          ? `"${label}" fired but no keywords are enabled — nothing to collect`
-          : `"${label}" fired but none of its selected keywords are enabled — nothing to collect`,
+          ? `"${label}" fired but there are no keywords at all — nothing to collect`
+          : `"${label}" fired but no keywords are selected for it — nothing to collect`,
       );
       return [];
     }

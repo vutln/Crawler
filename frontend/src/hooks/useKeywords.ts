@@ -5,7 +5,6 @@ import {
   createKeyword,
   deleteKeyword,
   listKeywords,
-  runKeyword,
   updateKeyword,
 } from '@/api/endpoints';
 import { ApiError } from '@/api/http';
@@ -35,10 +34,10 @@ function useInvalidateKeywords() {
 export function useCreateKeyword() {
   const invalidate = useInvalidateKeywords();
   return useMutation({
-    // `enabled` is explicit because the schema marks it required: openapi-typescript
-    // treats a property with a `default` as always-present. Same reason
-    // CreateJobForm passes it. A newly added keyword should collect from tomorrow.
-    mutationFn: (text: string) => createKeyword({ text, enabled: true }),
+
+
+
+    mutationFn: (text: string) => createKeyword({ text }),
     onSuccess: async (keyword) => {
       toast.success(`Added "${keyword.text}"`);
       await invalidate();
@@ -95,30 +94,3 @@ export function useDeleteKeyword() {
   });
 }
 
-/**
- * Collect one keyword now, across every enabled sweep.
- *
- * This is what replaced ad-hoc SEARCH jobs. Invalidates crawlRuns rather than
- * keywords: the result is new RUNS, and the runs list polls every 2s while any are
- * active, so the user sees them appear.
- */
-export function useRunKeyword() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => runKeyword(id),
-    onSuccess: async (result) => {
-      if (result.queued === 0) {
-        // Every sweep was busy. Saying "queued" here would be a lie the user only
-        // discovers by staring at a runs list that never changes.
-        toast.warning('Every sweep already has a run in progress — nothing queued');
-      } else {
-        const skipped = result.skipped.length ? ` (${result.skipped.join(', ')} busy)` : '';
-        toast.success(`Queued on ${result.marketplaces.join(', ')}${skipped}`);
-      }
-      await queryClient.invalidateQueries({ queryKey: queryKeys.crawlRuns.all });
-    },
-    onError: (error) => {
-      toast.error(error instanceof ApiError ? error.message : 'Could not start the crawl');
-    },
-  });
-}

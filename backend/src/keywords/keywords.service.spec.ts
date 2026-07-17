@@ -1,6 +1,5 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import type { Keyword } from '../generated/prisma/client';
-import type { ICrawlQueue } from '../crawler/queue/crawl-queue.interface';
 import type { PrismaService } from '../prisma/prisma.service';
 import { KeywordsService } from './keywords.service';
 
@@ -22,7 +21,6 @@ describe('KeywordsService', () => {
     const rows: Keyword[] = seed.map((text, i) => ({
       id: `kw_${i}`,
       text,
-      enabled: true,
       notes: null,
       createdAt: new Date(0),
       updatedAt: new Date(0),
@@ -41,11 +39,10 @@ describe('KeywordsService', () => {
           );
           return Promise.resolve(found ? { ...found, _count: { products: 0 } } : null);
         },
-        create: ({ data }: { data: { text: string; enabled?: boolean; notes?: string | null } }) => {
+        create: ({ data }: { data: { text: string; notes?: string | null } }) => {
           const row: Keyword = {
             id: `kw_${rows.length}`,
             text: data.text,
-            enabled: data.enabled ?? true,
             notes: data.notes ?? null,
             createdAt: new Date(0),
             updatedAt: new Date(0),
@@ -61,7 +58,6 @@ describe('KeywordsService', () => {
             rows.push({
               id: `kw_${rows.length}`,
               text: d.text,
-              enabled: true,
               notes: null,
               createdAt: new Date(0),
               updatedAt: new Date(0),
@@ -84,8 +80,7 @@ describe('KeywordsService', () => {
       },
     } as unknown as PrismaService;
 
-    const queue = { enqueue: () => Promise.resolve() } as unknown as ICrawlQueue;
-    return { service: new KeywordsService(prisma, queue), rows };
+    return { service: new KeywordsService(prisma), rows };
   }
 
   describe('normalizeText — the identity of a keyword', () => {
@@ -217,16 +212,9 @@ describe('KeywordsService', () => {
       await expect(service.update('kw_0', { text: 'Mug' })).resolves.toMatchObject({ text: 'mug' });
     });
 
-    it('can disable without renaming', async () => {
-      const { service, rows } = makeService(['mug']);
-      await service.update('kw_0', { enabled: false });
-      expect(rows[0].enabled).toBe(false);
-      expect(rows[0].text).toBe('mug');
-    });
-
     it('404s on an unknown id', async () => {
       const { service } = makeService();
-      await expect(service.update('nope', { enabled: false })).rejects.toThrow(NotFoundException);
+      await expect(service.update('nope', { text: 'x' })).rejects.toThrow(NotFoundException);
     });
   });
 

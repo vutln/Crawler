@@ -2,7 +2,7 @@
 
 Tracks product **prices over time** across Amazon, Etsy and eBay — a NestJS crawler with a pluggable adapter architecture, and a React dashboard to browse products, chart price history, and run crawls.
 
-A *scraper* grabs a price once. A **collector** re-visits the same product on a schedule so you get a time series. That distinction drives the whole design: prices are append-only and never updated in place.
+A _scraper_ grabs a price once. A **collector** re-visits the same product on a schedule so you get a time series. That distinction drives the whole design: prices are append-only and never updated in place.
 
 ![Dashboard](docs/images/dashboard.png)
 
@@ -17,22 +17,16 @@ A *scraper* grabs a price once. A **collector** re-visits the same product on a 
 
 - **Price history, not snapshots** — every observation is an immutable row; the chart is the product
 - **Pluggable marketplaces** — add a site with one adapter class; the compiler finds the one place the frontend needs updating
-- **API adapters outrank scrapers** — drop in an eBay/Etsy API key and the registry switches automatically, no code change
-- **Honest about being blocked** — anti-bot walls end a run as `BLOCKED` with evidence, never as a silent "success with 0 results"
 - **Polite by default** — robots.txt respected, per-domain throttling, conservative rate limits
 - **Offline, deterministic tests** — adapter parsing is tested against frozen HTML with the network disabled
 
 ## Stack
 
-| | |
-|---|---|
-| **Backend** | NestJS 11 · Prisma 7 · MySQL 8 · Selenium 4 · TypeScript 5.9 |
+|              |                                                                  |
+| ------------ | ---------------------------------------------------------------- |
+| **Backend**  | NestJS 11 · Prisma 7 · MySQL 8 · Selenium 4 · TypeScript 5.9     |
 | **Frontend** | React 19 · Vite 7 · TanStack Query v5 · Tailwind v4 · Recharts 3 |
-| **Testing** | Jest · Selenium (fixture, E2E and live-canary tiers) |
-
-> **Before you plan around the Selenium adapters:** eBay and Etsy disallow search scraping in their robots.txt, so with default settings those runs correctly end as `FAILED`. Amazon works. The official APIs are the real path for eBay and Etsy — see [CLAUDE.md](CLAUDE.md#reality-check-on-scraping-these-sites) for the measured results.
->
-> Scraping may breach a site's terms of service regardless of what robots.txt permits. Check the terms for any site you point this at, and prefer the official API where one exists.
+| **Testing**  | Jest · Selenium (fixture, E2E and live-canary tiers)             |
 
 ---
 
@@ -61,7 +55,9 @@ mysql -u root -p < prisma/init-db.sql
 ```powershell
 & "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p < prisma\init-db.sql
 ```
+
 Or add `C:\Program Files\MySQL\MySQL Server 8.0\bin` to your PATH.
+
 </details>
 
 ### 2. Backend
@@ -107,14 +103,12 @@ npm run test:e2e      # Selenium against the dashboard (needs both servers runni
 npm run test:canary   # hits LIVE sites to detect DOM drift — not for CI
 ```
 
-| Tier | Proves | CI |
-|---|---|---|
-| Unit | Price/rating/URL normalization, block detection | ✅ |
-| Fixture | Real parser, real Chrome, frozen HTML, network disabled | ✅ |
-| E2E | Dashboard flows against real API + DB | ✅ |
-| Canary | Live DOM still matches our selectors | ❌ never |
-
-Why the tiers are split this way — and how to refresh a fixture — is in [CLAUDE.md](CLAUDE.md#testing-philosophy).
+| Tier    | Proves                                                  | CI       |
+| ------- | ------------------------------------------------------- | -------- |
+| Unit    | Price/rating/URL normalization, block detection         | ✅       |
+| Fixture | Real parser, real Chrome, frozen HTML, network disabled | ✅       |
+| E2E     | Dashboard flows against real API + DB                   | ✅       |
+| Canary  | Live DOM still matches our selectors                    | ❌ never |
 
 ## Project structure
 
@@ -138,7 +132,3 @@ frontend/src/
 ├─ pages/        one folder per page: index.tsx + components/
 └─ components/   shared UI
 ```
-
----
-
-**[CLAUDE.md](CLAUDE.md)** covers the rest: design rationale and invariants, the measured reality of scraping each site, adding a marketplace, testing philosophy, the full environment table, and troubleshooting.

@@ -20,9 +20,6 @@ import type { CrawlContext, ProductRecord } from '../adapter.interface';
  * Expect RunStatus.BLOCKED regularly. That is the system working — the block is
  * detected and reported rather than silently producing an empty "successful" run.
  *
- * If you need Amazon data reliably, the Product Advertising API is the supported
- * path; write an AmazonApiAdapter implementing MarketplaceAdapter and it will
- * outrank this class automatically without touching any other code.
  */
 @Injectable()
 export class AmazonSeleniumAdapter extends SeleniumAdapterBase {

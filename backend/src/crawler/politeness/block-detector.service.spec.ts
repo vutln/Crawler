@@ -67,6 +67,39 @@ describe('BlockDetectorService', () => {
       expect(signal.blocked).toBe(true);
     });
 
+    /**
+     * REGRESSION — reported from a live Amazon crawl of /s?k=Tungsten%20Cube
+     * that had SUCCEEDED the day before.
+     *
+     * Amazon served its "Dogs of Amazon" error page. No signature matched it, so
+     * the run was only caught by the bodyChars=0 backstop in diagnoseEmptyPage()
+     * and reported "almost certainly a JavaScript anti-bot challenge" — the wrong
+     * reason, and luck rather than detection. Had the page's text rendered (>50
+     * chars, which is what the operator saw in the browser), nothing would have
+     * fired and the run would have reported SUCCEEDED / 0 items.
+     *
+     * Title verbatim from the run's evidence field:
+     */
+    const AMAZON_DOGS = `
+      <html><head><title>Sorry! Something went wrong!</title></head><body>
+        <h1>Sorry! Something went wrong on our end.</h1>
+        <p>Please go back and try again or go to Amazon's home page.</p>
+        <img alt="Dogs of Amazon"/>
+      </body></html>`;
+
+    it('detects the Amazon "Dogs of Amazon" error page', () => {
+      const signal = detector.inspect({ html: AMAZON_DOGS });
+      expect(signal.blocked).toBe(true);
+      expect(signal.reason).toMatch(/Dogs of Amazon/i);
+    });
+
+    it('detects it from the title alone, before the 15s render timeout', () => {
+      // navigate() -> assertNotBlocked() sees only the title here. Catching it at
+      // this point is what turns a 16s run into a ~1s one with an honest reason.
+      const signal = detector.inspect({ title: 'Sorry! Something went wrong!' });
+      expect(signal.blocked).toBe(true);
+    });
+
     it.each([
       ['Amazon CAPTCHA', 'Enter the characters you see below'],
       ['Amazon automated-access', 'To discuss automated access to Amazon data please contact'],
@@ -125,6 +158,19 @@ describe('BlockDetectorService', () => {
       // "Robot Vacuum" must not trip the /are you a (human|robot)/ check.
       const html = '<html><body><h1>Robot Vacuum Cleaner, Automated Home Assistant</h1></body></html>';
       expect(detector.inspect({ html }).blocked).toBe(false);
+    });
+
+    it('passes a review that merely says something went wrong', () => {
+      // The Amazon error signature keys on its house phrasing ("Sorry!" then
+      // "Something went wrong"). Ordinary prose using those words apart must not
+      // turn a real results page into a fake BLOCKED.
+      const html = `
+        <html><head><title>tungsten cube | Amazon.com</title></head><body>
+          <div data-asin="B0CYY6SFYG"><span>Tungsten Cube 1.5"</span>
+          <p>Two stars — something went wrong with my order and support was slow.
+             Sorry, but I expected better.</p></div>
+        </body></html>`;
+      expect(detector.inspect({ html, title: 'tungsten cube | Amazon.com' }).blocked).toBe(false);
     });
 
     it('passes an empty input', () => {

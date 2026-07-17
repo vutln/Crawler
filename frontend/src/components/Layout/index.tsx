@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
+import { env } from '@/env';
 import { cn } from '@/lib/utils';
 
 const NAV = [
@@ -7,7 +8,7 @@ const NAV = [
   { to: '/crawl-jobs', label: 'Crawl Jobs', end: false },
 ];
 
-export function AppShell() {
+export function Layout() {
   return (
     <div className="min-h-screen">
       <header className="border-b border-slate-200 bg-white">
@@ -34,8 +35,14 @@ export function AppShell() {
               </NavLink>
             ))}
           </nav>
+          {/*
+            Same seam as every API call (see api/http.ts): apiBaseUrl is empty in
+            dev, so this resolves to /api/docs and Vite proxies it — same-origin,
+            no CORS. Swagger is mounted under the 'api' prefix, so it rides the
+            existing proxy rule and needs no dedicated env var of its own.
+          */}
           <a
-            href="http://localhost:3000/api/docs"
+            href={`${env.apiBaseUrl}/api/docs`}
             target="_blank"
             rel="noreferrer noopener"
             className="ml-auto text-xs text-slate-400 hover:text-slate-700"

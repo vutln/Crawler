@@ -26,6 +26,22 @@ export class BlockDetectorService {
     { pattern: /To discuss automated access to Amazon data/i, reason: 'Amazon automated-access notice' },
     { pattern: /api-services-support@amazon\.com/i, reason: 'Amazon automated-access notice' },
 
+    // The "Dogs of Amazon" page. Amazon's generic error page, which it also
+    // serves as a soft block once an IP has made enough automated requests —
+    // the same URL that worked yesterday returns this today.
+    //
+    // Genuinely ambiguous: it can be a real transient 5xx. Classified BLOCKED
+    // anyway because it is never a successful search, and FAILED invites a retry
+    // loop that deepens the throttle. Repeat-visitor IPs see it far more often
+    // than real outages would explain.
+    //
+    // Matched loosely on Amazon's house phrasing rather than the full sentence:
+    // the Etsy regression below is what near-miss signatures cost.
+    {
+      pattern: /Sorry!\s*Something went wrong/i,
+      reason: 'Amazon "Dogs of Amazon" error page — soft block or transient error',
+    },
+
     // eBay
     { pattern: /Pardon Our Interruption/i, reason: 'eBay/Distil interstitial' },
     { pattern: /ebay\.com\/splashui\/captcha/i, reason: 'eBay CAPTCHA' },

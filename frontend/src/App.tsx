@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { Route, Routes } from 'react-router-dom';
-import { AppShell } from '@/components/AppShell';
+import { Layout } from '@/components/Layout';
 import { Spinner } from '@/components/ui';
 import DashboardPage from '@/pages/dashboard';
 import ProductsPage from '@/pages/products';
@@ -11,7 +11,7 @@ const ProductDetailPage = lazy(() => import('@/pages/product-detail'));
 export default function App() {
   return (
     <Routes>
-      <Route element={<AppShell />}>
+      <Route element={<Layout />}>
         <Route index element={<DashboardPage />} />
         <Route path="products" element={<ProductsPage />} />
         <Route

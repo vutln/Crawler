@@ -6,6 +6,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  Matches,
   Max,
   Min,
   validateSync,
@@ -146,6 +147,27 @@ export class EnvVars {
   @IsString()
   @IsOptional()
   CRAWL_COOKIES_JSON = '[]';
+
+  /**
+   * US ZIP to set as the browser session's delivery address. Empty = don't set one.
+   *
+   * Amazon hides the price on any listing it can't ship to the session's address,
+   * and with no address it infers one from the egress IP — so a non-US egress gets
+   * listings back with title and reviews but no price. Naming a US ZIP is what makes
+   * those prices visible, and is the delivery half of the US-market requirement
+   * that CRAWL_COOKIES_JSON's i18n-prefs=USD only covers the currency half of.
+   *
+   * Unlike the currency, this is NOT a cookie and cannot be seeded: Amazon holds the
+   * address server-side against the session, so AmazonSeleniumAdapter sets it through
+   * the site's own location widget on each new browser.
+   */
+  @IsString()
+  @IsOptional()
+  @Matches(/^\d{5}$/, {
+    message:
+      'AMAZON_DELIVERY_ZIP must be a 5-digit US ZIP (e.g. 00501), or empty to not set one',
+  })
+  AMAZON_DELIVERY_ZIP = '';
 }
 
 export function validateEnv(raw: Record<string, unknown>): EnvVars {

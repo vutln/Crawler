@@ -1,5 +1,6 @@
 import { Builder, type WebDriver, logging } from 'selenium-webdriver';
 import { Options as ChromeOptions } from 'selenium-webdriver/chrome';
+import { BlockDetectorService } from '../../src/crawler/politeness/block-detector.service';
 
 /**
  * US-MARKET CANARY — hits LIVE Amazon. Excluded from `npm test` and from CI.
@@ -35,8 +36,19 @@ type DevToolsWebDriver = WebDriver & {
   sendDevToolsCommand(command: string, parameters?: Record<string, unknown>): Promise<void>;
 };
 
-const BLOCK_MARKERS =
-  /Enter the characters you see below|Sorry[!,.]?\s*Something went wrong|Something went wrong on our end|not a robot/i;
+/**
+ * Ask the REAL detector what a block is, rather than keeping a second opinion here.
+ *
+ * This used to be a hand-copied regex, and it had already drifted: it knew the
+ * CAPTCHA and the error page but not Amazon's "Click the button below to continue
+ * shopping" wall, which carries the automated-access notice and nothing else. On
+ * 2026-07-17 that page was served to this project repeatedly, and the canary would
+ * have read it as a normal page with zero cards and no USD — going red and blaming
+ * the cookie, which is exactly the false alarm the header comment promises not to
+ * raise. The detector is a plain class with no dependencies; there is no reason for
+ * a copy of its knowledge to exist and rot.
+ */
+const detector = new BlockDetectorService();
 
 /** The visually-hidden span holding the whole price string — what the adapter reads. */
 const OFFSCREEN_PRICE = /class="a-offscreen">([^<]{1,24})</g;
@@ -102,11 +114,16 @@ describe('CANARY: Amazon still honours i18n-prefs=USD', () => {
 
     await driver.get(URL);
     html = await driver.getPageSource();
-    blocked = BLOCK_MARKERS.test(html);
+
+    const signal = detector.inspect({
+      html,
+      url: await driver.getCurrentUrl(),
+    });
+    blocked = signal.blocked;
 
     if (blocked) {
       console.warn(
-        '\n  CANARY INCONCLUSIVE: Amazon served an anti-bot / error page.' +
+        `\n  CANARY INCONCLUSIVE: ${signal.reason ?? 'Amazon served an anti-bot / error page'}.` +
           '\n  This says nothing about the currency mechanism — try later.\n',
       );
     }

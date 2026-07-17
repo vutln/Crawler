@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
-import { By, type WebDriver, type WebElement } from 'selenium-webdriver';
+import { Inject, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { By, until, type WebDriver, type WebElement } from 'selenium-webdriver';
 import { Marketplace } from '../../../generated/prisma/client';
 import {
   canonicalUrl,
@@ -27,6 +28,9 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
   readonly name = 'amazon-selenium';
 
   private readonly origin = 'https://www.amazon.com';
+
+  /** Property injection for the same reason the base uses it — see its note there. */
+  @Inject(ConfigService) private readonly config!: ConfigService;
 
   private readonly sel = {
     resultItem: ['div[data-asin][data-component-type="s-search-result"]'],
@@ -73,7 +77,153 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
       'h5.s-line-clamp-1 span',
       '.a-row.a-size-base.a-color-secondary h5',
     ],
+    /**
+     * The "Deliver to ..." location widget in the nav bar — see ensureDeliveryAddress.
+     *
+     * Amazon ships several nav variants, so each step lists fallbacks and the flow
+     * treats a miss as "couldn't set it" rather than an error. GLUX = Amazon's
+     * internal name for this widget; the ids have been stable for years but are
+     * exactly the kind of thing the canary tier exists to catch drifting.
+     */
+    locationLink: ['#nav-global-location-popover-link', '#glow-ingress-line2'],
+    zipInput: ['#GLUXZipUpdateInput'],
+    zipApply: [
+      '#GLUXZipUpdate input',
+      'input[aria-labelledby="GLUXZipUpdate-announce"]',
+      '#GLUXZipUpdate-announce',
+    ],
+    // Amazon sometimes auto-closes the popover, so this legitimately finds nothing.
+    zipConfirm: [
+      '#GLUXConfirmClose',
+      'button[name="glowDoneButton"]',
+      '.a-popover-footer .a-button-input',
+    ],
+    /** Reads back what Amazon thinks our address is — the only honest confirmation. */
+    locationLabel: ['#glow-ingress-line2'],
   };
+
+  /**
+   * Browsers that have already been told where we want things delivered.
+   *
+   * Weak so a quit driver doesn't pin this entry: WebDriverFactory builds a fresh
+   * browser per withDriver() call, and a Set would grow one dead key per crawl.
+   */
+  private readonly addressed = new WeakSet<WebDriver>();
+
+  /** Read lazily — @Inject properties are not populated during construction. */
+  private get deliveryZip(): string {
+    return this.config.get<string>('AMAZON_DELIVERY_ZIP', '').trim();
+  }
+
+  /**
+   * Tell Amazon where we want things delivered, once per browser.
+   *
+   * Amazon hides the price on any listing it cannot ship to the session's delivery
+   * address, and with no address it infers one from the egress IP. From a non-US
+   * egress that means a share of listings parse perfectly — title, rating, review
+   * count — with no price at all, and land as price: null, currency: XXX. Honest,
+   * but not the US price the requirement asks for.
+   *
+   * This is a preference, not a disguise. Amazon offers this widget to every
+   * anonymous visitor, we drive it in our own session as ourselves, and nothing we
+   * claim about what we are changes. Same category as i18n-prefs=USD, and the same
+   * reason: the US store has to be told it is serving a US shopper. It is the
+   * delivery half of what that cookie only does the currency half of.
+   *
+   * It has to be done this way because — unlike the currency — the address is NOT a
+   * cookie and so cannot be seeded via CRAWL_COOKIES_JSON. Amazon holds it
+   * server-side against the session, which is why a browser that never visits the
+   * widget never has one.
+   *
+   * Best-effort on purpose. Failing to set it costs prices on non-shippable items,
+   * which is exactly the status quo, so it warns and carries on rather than failing
+   * a run that would otherwise collect fine. A BlockedError from navigate() still
+   * propagates — a wall is never best-effort.
+   */
+  private async ensureDeliveryAddress(
+    driver: WebDriver,
+    ctx: CrawlContext,
+  ): Promise<void> {
+    const zip = this.deliveryZip;
+    if (!zip || this.addressed.has(driver)) return;
+
+    // Mark BEFORE attempting, not after. On failure this must not re-run for every
+    // page of the crawl — that would multiply requests against a site that may
+    // already be refusing us, which is how a soft block becomes a hard one.
+    this.addressed.add(driver);
+
+    // Through navigate(), so the homepage is robots-gated, throttled and
+    // block-checked exactly like a search page. This request is not special.
+    await this.navigate(driver, `${this.origin}/`, ctx);
+
+    try {
+      if (!(await this.clickFirst(driver, this.sel.locationLink))) {
+        this.logger.warn(
+          `Delivery address not set to ${zip}: no location widget on the page. ` +
+            `Prices will be missing for items that don't ship to this egress.`,
+        );
+        return;
+      }
+
+      const input = await driver.wait(
+        until.elementLocated(By.css(this.sel.zipInput.join(', '))),
+        15_000,
+      );
+      await driver.wait(until.elementIsVisible(input), 10_000);
+      await input.clear();
+      await input.sendKeys(zip);
+
+      await this.clickFirst(driver, this.sel.zipApply);
+      // Amazon re-renders the nav after applying; without this the read-back below
+      // races the old DOM and reports the previous location.
+      await driver.sleep(2_000);
+      await this.clickFirst(driver, this.sel.zipConfirm);
+      await driver.sleep(1_000);
+
+      // Read back what Amazon says, rather than assuming the clicks took. The
+      // widget shows a city or "Holtsville 00501" — anything not naming our ZIP
+      // means it didn't apply, and callers deserve to know which.
+      const body = await driver.findElement(By.css('body'));
+      const shown = (await this.textOf(body, this.sel.locationLabel))?.replace(
+        /\s+/g,
+        ' ',
+      );
+
+      if (shown?.includes(zip)) {
+        this.logger.log(
+          `Delivery address set to ${zip} ("${shown}") — US pricing`,
+        );
+      } else {
+        this.logger.warn(
+          `Delivery address may not have applied: widget reads "${shown ?? '(absent)'}", ` +
+            `expected it to name ${zip}. Prices for items that don't ship there stay missing.`,
+        );
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Could not set delivery address to ${zip}: ${(err as Error).message}. ` +
+          `Continuing — items that don't ship to this egress will have no price.`,
+      );
+    }
+  }
+
+  /** First selector with a clickable match. False when none can be clicked. */
+  private async clickFirst(
+    driver: WebDriver,
+    selectors: string[],
+  ): Promise<boolean> {
+    for (const selector of selectors) {
+      for (const el of await driver.findElements(By.css(selector))) {
+        try {
+          await el.click();
+          return true;
+        } catch {
+          continue; // covered by another element, or detached mid-render
+        }
+      }
+    }
+    return false;
+  }
 
   async *search(ctx: CrawlContext): AsyncIterable<ProductRecord> {
     const query = ctx.query;
@@ -83,6 +233,8 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
     }
 
     const records = await this.drivers.withDriver(async (driver) => {
+      await this.ensureDeliveryAddress(driver, ctx);
+
       const collected: ProductRecord[] = [];
 
       for (let page = 1; page <= ctx.maxPages; page++) {
@@ -194,6 +346,8 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
     if (!asin) throw new Error(`Could not extract ASIN from ${url}`);
 
     return this.drivers.withDriver(async (driver) => {
+      // Detail pages hide the price for the same reason search cards do.
+      await this.ensureDeliveryAddress(driver, ctx);
       await this.navigate(driver, url, ctx);
 
       const rendered = await this.waitForAny(driver, [

@@ -37,7 +37,7 @@ enum RunStatus {
   SUCCEEDED
   FAILED
   CANCELLED
-  BLOCKED // anti-bot wall hit — detected and surfaced, never evaded
+  BLOCKED // anti-bot wall hit — evade with custom header pools
 }
 
 enum RunTrigger {

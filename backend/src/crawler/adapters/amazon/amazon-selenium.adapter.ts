@@ -52,8 +52,6 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
       const url = `${this.origin}/s?k=${encodeURIComponent(ctx.query)}&page=${page}`;
 
       const records = await this.drivers.withDriver(async (driver) => {
-        // navigate() throws BlockedError on a CAPTCHA — the run ends as BLOCKED,
-        // which is the honest outcome. We do not attempt to work around it.
         await this.navigate(driver, url, ctx);
         return this.parseSearchPage(driver, `Amazon page ${page}`);
       });

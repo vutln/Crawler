@@ -6,13 +6,6 @@ export interface BlockSignal {
   evidence?: string;
 }
 
-/**
- * Recognises anti-bot walls. Detects and STOPS — never evades or disguises.
- *
- * Needed because a blocked page still returns HTTP 200 with a parseable DOM, so
- * without this a crawl "succeeds" with zero products and looks identical to a
- * search that had no results.
- */
 @Injectable()
 export class BlockDetectorService {
   private readonly logger = new Logger(BlockDetectorService.name);

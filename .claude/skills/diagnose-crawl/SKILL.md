@@ -92,8 +92,16 @@ report a false failure.
 | AWS WAF JS challenge                            | `gokuProps`, blank title, ~2KB      | **NO — known gap**  |
 
 The Dogs page is ambiguous by nature — served both for genuine 5xx blips and as a soft
-block — so `navigate()` gives it **exactly one** retry. Explicit refusals (CAPTCHA, WAF,
-"not a robot") are never retried: the site answered in words.
+block — so `navigate()` reloads it up to `MAX_AMBIGUOUS_RELOADS` (2) times, i.e. **3
+loads at most**, stopping the moment it clears. Explicit refusals (CAPTCHA, WAF, "not a
+robot") are never reloaded: the site answered in words.
+
+Expect these in the log when it fires:
+
+```
+WARN  ...ambiguous by nature, look 2 of 3 before calling it a wall
+LOG   ...cleared on look 2 — transient, not a wall
+```
 
 The AWS WAF challenge is undetected and does **not** self-resolve (static at 1,995 chars
 after 14s). It surfaces as `title: ""` with zero elements — including no nav bar, so

@@ -27,6 +27,18 @@ const EMPTY_BODY_THRESHOLD = 50;
 const MAX_IDLE_HOLD_MS = 15_000;
 
 /**
+ * Reloads allowed for an AMBIGUOUS block signal — so at most 1 + this many loads.
+ *
+ * Only ever applied to a signal the detector marks ambiguous; an explicit refusal
+ * is never reloaded at all. The number is a budget for disambiguating a page, not
+ * a persistence dial: raising it does not improve the odds of getting in, it just
+ * knocks more times before admitting the answer. Anything much above this stops
+ * being "look again" and becomes a retry loop against a site that may be refusing
+ * us, which is what deepens the throttle.
+ */
+const MAX_AMBIGUOUS_RELOADS = 2;
+
+/**
  * Robots gating, throttling, block detection and navigation.
  * Subclasses implement parsing only.
  */
@@ -110,32 +122,40 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
     let signal = await this.inspectPage(driver);
 
     /**
-     * Exactly one retry, and ONLY for a signal the detector marks ambiguous.
+     * Up to MAX_AMBIGUOUS_RELOADS reloads, and ONLY for a signal the detector
+     * marks ambiguous — so at most 1 + MAX_AMBIGUOUS_RELOADS loads in total.
      *
      * The marketplace error page ("Sorry! Something went wrong") is served both
      * for genuine 5xx blips and as a soft block — the detector's own comment says
      * it is "genuinely ambiguous", and one sample cannot tell them apart. We used
      * to resolve that by always guessing "wall", paying 6 backoff steps (~2min)
-     * and failing the run on evidence that might be a hiccup. A second look costs
-     * one request and settles it.
+     * and failing the run on evidence that might be a hiccup. Looking again costs
+     * one request and settles it. Amazon has been observed serving this page on a
+     * cold hit and rendering normally on reload, which is the case this recovers.
      *
-     * The boundary matters more than the retry. An EXPLICIT refusal — CAPTCHA,
-     * "not a robot", DataDome, Distil — is never retried: the site answered in
+     * The boundary matters more than the count. An EXPLICIT refusal — CAPTCHA,
+     * "not a robot", DataDome, Distil — is never reloaded: the site answered in
      * words, and asking again is a retry loop, which is the thing that deepens
      * the throttle and the thing this codebase refuses to do. We also do not
-     * change anything about ourselves between the two attempts: same driver, same
+     * change anything about ourselves between attempts: same driver, same
      * cookies, same headers, same identity. This disambiguates a page; it does not
-     * try to get a different answer to the same question.
+     * try to get a different answer to the same question. The loop condition keeps
+     * that honest — the moment a signal stops being ambiguous, reloading stops,
+     * whether it cleared or hardened into an explicit refusal.
      *
-     * Costed like any other request: it goes through throttle.acquire(), so the
-     * per-host floor is paid again before we knock.
+     * Costed like any other request: each pass goes through throttle.acquire(), so
+     * the per-host floor is paid again before every knock.
      */
-    if (signal.blocked && signal.ambiguous) {
+    for (
+      let reload = 1;
+      reload <= MAX_AMBIGUOUS_RELOADS && signal.blocked && signal.ambiguous;
+      reload++
+    ) {
       if (ctx.signal.aborted) throw new Error('Aborted');
 
       this.logger.warn(
-        `${url}: ${signal.reason} — ambiguous by nature, taking one more look ` +
-          `before calling it a wall`,
+        `${url}: ${signal.reason} — ambiguous by nature, look ${reload + 1} of ` +
+          `${MAX_AMBIGUOUS_RELOADS + 1} before calling it a wall`,
       );
 
       await this.throttle.acquire(url, ctx.signal);
@@ -143,7 +163,9 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
       signal = await this.inspectPage(driver);
 
       if (!signal.blocked) {
-        this.logger.log(`${url}: second look rendered normally — transient, not a wall`);
+        this.logger.log(
+          `${url}: cleared on look ${reload + 1} — transient, not a wall`,
+        );
       }
     }
 

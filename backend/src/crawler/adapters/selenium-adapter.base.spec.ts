@@ -8,7 +8,7 @@ import { BlockedError, type CrawlContext, type ProductRecord } from './adapter.i
 import { SeleniumAdapterBase } from './selenium-adapter.base';
 
 /**
- * navigate()'s block handling — specifically the one-retry rule.
+ * navigate()'s block handling — specifically the ambiguous-reload rule.
  *
  * The retry exists because the marketplace error page is ambiguous by nature: it
  * is served both for real 5xx blips and as a soft block, and one sample cannot
@@ -108,8 +108,11 @@ describe('SeleniumAdapterBase.navigate — block handling', () => {
   });
 
   /**
-   * The reason the retry exists: the error page cleared on a second look, so it
+   * The reason the reloads exist: the error page cleared on a second look, so it
    * was a blip. Previously this cost 6 backoff steps and failed the whole run.
+   *
+   * Stops at 2 loads, not 3: the budget is an upper bound, not a quota. Once the
+   * page renders there is nothing left to disambiguate.
    */
   it('takes a second look at the ambiguous error page and proceeds when it clears', async () => {
     const { adapter, throttle } = makeAdapter();
@@ -121,12 +124,40 @@ describe('SeleniumAdapterBase.navigate — block handling', () => {
     expect(throttle.backoffMsFor(URL)).toBe(0);
   });
 
+  /** The case the second reload buys: two error pages, then a real one. */
+  it('takes a third look when the error page survives the second', async () => {
+    const { adapter, throttle } = makeAdapter();
+    const { driver, loads } = makeDriver([DOGS_PAGE, DOGS_PAGE, GOOD_PAGE]);
+
+    await expect(adapter.go(driver, URL, ctx())).resolves.toBeUndefined();
+    expect(loads()).toBe(3);
+    expect(throttle.backoffMsFor(URL)).toBe(0);
+  });
+
   it('calls it a wall when the error page persists, and charges the full backoff', async () => {
     const { adapter, throttle } = makeAdapter();
-    const { driver, loads } = makeDriver([DOGS_PAGE, DOGS_PAGE]);
+    const { driver, loads } = makeDriver([DOGS_PAGE, DOGS_PAGE, DOGS_PAGE]);
 
     await expect(adapter.go(driver, URL, ctx())).rejects.toThrow(BlockedError);
-    // Exactly one retry — never a third knock.
+    // The bound holds: 1 + MAX_AMBIGUOUS_RELOADS, never a fourth knock. makeDriver
+    // serves its last page forever, so an unbounded loop would hang here rather
+    // than fail — this number is the only thing pinning termination.
+    expect(loads()).toBe(3);
+    expect(throttle.backoffMsFor(URL)).toBeGreaterThan(0);
+  });
+
+  /**
+   * Ambiguity is not persistence. If the second look comes back an EXPLICIT
+   * refusal, reloading stops immediately — the remaining budget is not spent,
+   * because the site has now answered in words.
+   */
+  it('stops reloading the moment an ambiguous page hardens into a refusal', async () => {
+    const { adapter, throttle } = makeAdapter();
+    const { driver, loads } = makeDriver([DOGS_PAGE, CAPTCHA_PAGE, GOOD_PAGE]);
+
+    await expect(adapter.go(driver, URL, ctx())).rejects.toThrow(/blocked the request/i);
+    // 3 would mean we burned the last reload on a page that already said no —
+    // and note the third page is GOOD, so doing so would have "succeeded".
     expect(loads()).toBe(2);
     expect(throttle.backoffMsFor(URL)).toBeGreaterThan(0);
   });
@@ -134,10 +165,13 @@ describe('SeleniumAdapterBase.navigate — block handling', () => {
   /**
    * THE IMPORTANT ONE.
    *
-   * A CAPTCHA is the site refusing us in words. Retrying it would be re-asking a
+   * A CAPTCHA is the site refusing us in words. Reloading it would be re-asking a
    * question that was already answered — a retry loop, and the precise behaviour
-   * this project declines to implement. The one-retry rule must never widen to
+   * this project declines to implement. The reload budget must never widen to
    * cover explicit refusals, so this asserts a single load and an immediate wall.
+   *
+   * This matters more as the budget grows: raising MAX_AMBIGUOUS_RELOADS must
+   * change how long we spend disambiguating, never what we're willing to reload.
    */
   it('never knocks twice on an explicit refusal', async () => {
     const { adapter, throttle } = makeAdapter();

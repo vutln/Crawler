@@ -77,6 +77,18 @@ export class EnvVars {
   @IsOptional()
   CRAWL_MAX_RETRIES = 3;
 
+  /**
+   * Ceiling on per-domain exponential backoff. A detected wall costs several
+   * steps at once, so this is what a repeatedly-blocked host actually waits.
+   * Default 15min: an Amazon soft block lifts on a scale of minutes-to-hours,
+   * and the old 60s ceiling was noise against that.
+   */
+  @IsInt()
+  @Min(0)
+  @Transform(({ value }) => parseInt(value as string, 10))
+  @IsOptional()
+  CRAWL_MAX_BACKOFF_MS = 900_000;
+
   @IsBoolean()
   @toBool()
   @IsOptional()

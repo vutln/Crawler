@@ -13,15 +13,31 @@ import { ConfigService } from '@nestjs/config';
 export class ThrottleService {
   private readonly logger = new Logger(ThrottleService.name);
   private readonly minDelayMs: number;
+  private readonly maxBackoffMs: number;
 
   /** hostname -> promise chain tail. Serializes waiters per domain. */
   private readonly queues = new Map<string, Promise<void>>();
   private readonly lastRequestAt = new Map<string, number>();
-  /** hostname -> consecutive failures, drives exponential backoff. */
-  private readonly failures = new Map<string, number>();
+
+  /**
+   * hostname -> backoff step. Failures nudge it, walls jump it, successes walk it
+   * back down one at a time. See recordSuccess for why the walk-down matters.
+   */
+  private readonly steps = new Map<string, number>();
+
+  /**
+   * What a detected wall costs, in steps.
+   *
+   * A wall is categorically worse than a blip: the site has made a decision about
+   * us and it lifts on its own schedule, not ours. At the default 2s floor, +6
+   * puts the next request ~2min out (2s * 2^6) and a second wall reaches the cap.
+   * A transient 5xx moves a single step, because it usually means nothing.
+   */
+  private static readonly BLOCK_STEPS = 6;
 
   constructor(private readonly config: ConfigService) {
     this.minDelayMs = this.config.get<number>('CRAWL_MIN_DELAY_MS', 2000);
+    this.maxBackoffMs = this.config.get<number>('CRAWL_MAX_BACKOFF_MS', 900_000);
   }
 
   /**
@@ -41,41 +57,101 @@ export class ThrottleService {
     return current;
   }
 
-  private async waitTurn(host: string, signal?: AbortSignal): Promise<void> {
+  /** Raw step-based backoff, ignoring time already served. Diagnostics. */
+  backoffMsFor(url: string): number {
+    return this.backoffFor(safeHostname(url));
+  }
+
+  /**
+   * Milliseconds still owed before this host may be touched — the backoff minus
+   * the time already served. 0 means go now.
+   *
+   * Time-aware on purpose. Steps only decay on a success, so a cooldown that
+   * could *only* be paid off by succeeding would deadlock any caller that
+   * declines to knock while owed: no request, no success, no decay, host
+   * poisoned for the life of the process. Serving the sentence by waiting has to
+   * count.
+   */
+  owedMsFor(url: string): number {
+    return this.owedFor(safeHostname(url));
+  }
+
+  private owedFor(host: string): number {
     const last = this.lastRequestAt.get(host) ?? 0;
-    const backoff = this.backoffFor(host);
-    const target = last + this.minDelayMs + backoff;
-    const waitMs = Math.max(0, target - Date.now());
+    const target = last + this.minDelayMs + this.backoffFor(host);
+    return Math.max(0, target - Date.now());
+  }
+
+  private async waitTurn(host: string, signal?: AbortSignal): Promise<void> {
+    const waitMs = this.owedFor(host);
+
+    // Cooling off after a wall runs to minutes, and the run sits RUNNING for all
+    // of it. Announce anything beyond the ordinary floor — an unexplained silent
+    // pause is indistinguishable from a hang.
+    if (waitMs > this.minDelayMs * 2) {
+      this.logger.log(
+        `${host}: holding ${Math.round(waitMs / 1000)}s before next request ` +
+          `(backoff step ${this.steps.get(host) ?? 0})`,
+      );
+    }
 
     if (waitMs > 0) await sleep(waitMs, signal);
     this.lastRequestAt.set(host, Date.now());
   }
 
-  /** Exponential, capped at 60s: 2s, 4s, 8s, 16s... */
+  /** Exponential in the step count, capped: 4s, 8s, 16s, 32s, 64s, 128s... */
   private backoffFor(host: string): number {
-    const n = this.failures.get(host) ?? 0;
+    const n = this.steps.get(host) ?? 0;
     if (n === 0) return 0;
-    return Math.min(60_000, this.minDelayMs * 2 ** n);
+    return Math.min(this.maxBackoffMs, this.minDelayMs * 2 ** n);
   }
 
+  /**
+   * Walk down one step — deliberately not a reset.
+   *
+   * A full reset made the backoff unreachable in practice. navigate() records a
+   * success for every page that loads, so a 3-page search walled on page 3 had
+   * its counter wiped by page 1 of the next run: the ceiling was one step (~4s)
+   * no matter how often the site refused us.
+   *
+   * A success is also not evidence the wall is gone. During an Amazon soft block
+   * some pages serve normally and others don't, so "it worked once" says nothing
+   * about whether we're still being throttled.
+   */
   recordSuccess(url: string): void {
-    this.failures.delete(safeHostname(url));
+    const host = safeHostname(url);
+    const n = this.steps.get(host) ?? 0;
+    if (n <= 1) this.steps.delete(host);
+    else this.steps.set(host, n - 1);
   }
 
-  /** Call on 429/5xx/timeouts. Next acquire() for this host waits longer. */
+  /** Call on 429/5xx/timeouts. Next acquire() for this host waits a little longer. */
   recordFailure(url: string): void {
+    this.bump(url, 1, 'failure');
+  }
+
+  /**
+   * Call when an anti-bot wall was detected. Distinct from recordFailure on
+   * purpose: this is the site telling us to stop, not a blip to shrug off.
+   */
+  recordBlock(url: string): void {
+    this.bump(url, ThrottleService.BLOCK_STEPS, 'BLOCK');
+  }
+
+  private bump(url: string, by: number, label: string): void {
     const host = safeHostname(url);
-    const n = (this.failures.get(host) ?? 0) + 1;
-    this.failures.set(host, n);
+    const n = (this.steps.get(host) ?? 0) + by;
+    this.steps.set(host, n);
     this.logger.warn(
-      `${host}: failure #${n}, backing off ${Math.round(this.backoffFor(host) / 1000)}s`,
+      `${host}: ${label} — backoff step ${n}, next request held ` +
+        `${Math.round(this.backoffFor(host) / 1000)}s`,
     );
   }
 
   reset(): void {
     this.queues.clear();
     this.lastRequestAt.clear();
-    this.failures.clear();
+    this.steps.clear();
   }
 }
 
@@ -87,7 +163,7 @@ function safeHostname(url: string): string {
   }
 }
 
-/** Abortable sleep — a cancelled run must not sit out a 60s backoff. */
+/** Abortable sleep — a cancelled run must not sit out a 15-minute backoff. */
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error('Aborted'));

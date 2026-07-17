@@ -16,6 +16,17 @@ import {
 const EMPTY_BODY_THRESHOLD = 50;
 
 /**
+ * Longest we'll idle with a browser attached rather than refuse the run.
+ *
+ * withDriver() launches Chrome before navigate() runs, so every wait inside
+ * navigate() is a wait with a live browser parked on Chrome's blank `data:,`
+ * page, holding one of SELENIUM_MAX_DRIVERS slots. A few seconds of that is
+ * ordinary pacing. A post-block cooldown is minutes, and with
+ * SELENIUM_HEADLESS=false it's a visibly frozen window.
+ */
+const MAX_IDLE_HOLD_MS = 15_000;
+
+/**
  * Robots gating, throttling, block detection and navigation.
  * Subclasses implement parsing only.
  */
@@ -68,6 +79,21 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
       throw new Error(`robots.txt disallows ${url} for our user-agent`);
     }
 
+    // Say so and stop, rather than idle a browser through a cooldown.
+    //
+    // The cooldown is NOT skipped or shortened by this — the host stays owed and
+    // the clock keeps running. This only decides how we spend the wait: a run
+    // that reports "cooling down, 118s left" in two seconds is more useful than
+    // one that shows RUNNING for two minutes behind a blank window.
+    const owed = this.throttle.owedMsFor(url);
+    if (owed > MAX_IDLE_HOLD_MS) {
+      throw new BlockedError(
+        `${this.marketplace} is ${Math.round(owed / 1000)}s into a cooldown from an earlier ` +
+          `block — not knocking again yet.`,
+        `owedMs=${owed} url=${url}`,
+      );
+    }
+
     await this.throttle.acquire(url, ctx.signal);
 
     try {
@@ -92,7 +118,10 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
     const signal = this.blockDetector.inspect({ html, title, url: currentUrl });
     if (signal.blocked) {
       this.blockDetector.logIfBlocked(signal, context);
-      this.throttle.recordFailure(context);
+      // recordBlock, not recordFailure: a wall costs several backoff steps. Keyed
+      // off the URL we navigated to — `context` here is that URL, and safeHostname
+      // needs a real one.
+      this.throttle.recordBlock(context);
       throw new BlockedError(
         `${this.marketplace} blocked the request: ${signal.reason}`,
         signal.evidence,
@@ -141,6 +170,7 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
     const signal = this.blockDetector.inspect({ html, title, url: currentUrl });
     if (signal.blocked) {
       this.blockDetector.logIfBlocked(signal, context);
+      this.recordBlockFor(currentUrl);
       throw new BlockedError(
         `${this.marketplace} blocked the request: ${signal.reason}`,
         signal.evidence,
@@ -149,6 +179,7 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
 
     if (text.length < EMPTY_BODY_THRESHOLD) {
       this.logger.warn(`${context}: empty body after full render timeout — treating as blocked`);
+      this.recordBlockFor(currentUrl);
       throw new BlockedError(
         `${this.marketplace} served a page with no content — almost certainly a JavaScript ` +
           `anti-bot challenge (the body never rendered).`,
@@ -164,6 +195,19 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
         `  url:   ${currentUrl}\n` +
         `  text:  ${text.slice(0, 240)}`,
     );
+  }
+
+  /**
+   * Charge a wall against the domain's backoff.
+   *
+   * Split out because diagnoseEmptyPage's `context` is a human label ("Amazon
+   * page 2"), not a URL — passing it to the throttle would key the backoff under
+   * a bogus host and silently record nothing useful. The driver's current URL is
+   * the only real one available here, and it's empty only if the driver died, in
+   * which case there's no host to charge.
+   */
+  private recordBlockFor(currentUrl: string): void {
+    if (currentUrl) this.throttle.recordBlock(currentUrl);
   }
 
   /**

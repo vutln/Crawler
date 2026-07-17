@@ -1,6 +1,9 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { Marketplace } from '../../generated/prisma/client';
-import { MARKETPLACE_ADAPTER, type MarketplaceAdapter } from './adapter.interface';
+import {
+  MARKETPLACE_ADAPTER,
+  type MarketplaceAdapter,
+} from './adapter.interface';
 
 /**
  * Resolves a Marketplace to the best available adapter.
@@ -46,7 +49,7 @@ export class AdapterRegistry {
         candidates.length === 0
           ? `No adapter registered for ${marketplace}.`
           : `All adapters for ${marketplace} are unavailable (missing credentials?): ` +
-            candidates.map((a) => a.name).join(', '),
+              candidates.map((a) => a.name).join(', '),
       );
     }
     return adapter;

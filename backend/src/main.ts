@@ -38,6 +38,7 @@ async function bootstrap(): Promise<void> {
     )
     .setVersion('1.0')
     .addTag('products', 'Collected products and price history')
+    .addTag('keywords', 'Search terms the daily sweep collects')
     .addTag('crawl-jobs', 'Crawl definitions')
     .addTag('crawl-runs', 'Crawl executions')
     .addTag('stats', 'Dashboard counters')

@@ -19,17 +19,15 @@ export const MARKETPLACE: Record<Marketplace, MarketplaceMeta> = {
   AMAZON: {
     label: 'Amazon',
     badgeClass: 'bg-amber-100 text-amber-800',
-    note: 'robots.txt permits search. Prices only render for a browser user-agent — leave CRAWL_USER_AGENT empty.',
   },
   ETSY: {
     label: 'Etsy',
     badgeClass: 'bg-orange-100 text-orange-800',
-    note: "Etsy's robots.txt disallows /search — scraping runs will fail. Set ETSY_API_KEY to use the official API.",
+    note: "Currency is configured by individual shop.",
   },
   EBAY: {
     label: 'eBay',
     badgeClass: 'bg-blue-100 text-blue-800',
-    note: "eBay's robots.txt disallows /sch — scraping runs will fail. Set EBAY_APP_ID to use the Browse API.",
   },
 };
 

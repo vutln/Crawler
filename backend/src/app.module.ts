@@ -4,6 +4,7 @@ import { validateEnv } from './config/env.validation';
 import { CrawlJobsModule } from './crawl-jobs/crawl-jobs.module';
 import { CrawlerModule } from './crawler/crawler.module';
 import { HealthModule } from './health/health.module';
+import { KeywordsModule } from './keywords/keywords.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
 import { StatsModule } from './stats/stats.module';
@@ -20,6 +21,7 @@ import { StatsModule } from './stats/stats.module';
     PrismaModule,
     CrawlerModule,
     ProductsModule,
+    KeywordsModule,
     CrawlJobsModule,
     StatsModule,
     HealthModule,

@@ -29,6 +29,8 @@ enum CrawlJobType {
   SEARCH
   PRODUCT_URLS
   CATEGORY
+  /// Fans out over every enabled Keyword — see the CrawlJob doc comment.
+  KEYWORD_SWEEP
 }
 
 enum RunStatus {
@@ -43,6 +45,58 @@ enum RunStatus {
 enum RunTrigger {
   MANUAL
   SCHEDULED
+}
+
+/// A search term tracked across every marketplace.
+///
+/// This model IS the keyword-configuration screen. Deliberately a flat global
+/// list rather than per-job: the requirement is "these keywords, on all three
+/// sites, daily", so the sites are the jobs and the keywords are data. Adding a
+/// keyword therefore causes no cron churn at all — see CrawlJob.
+model Keyword {
+  id      String  @id @default(cuid())
+  /// Normalized to lower+trim by KeywordsService before write; the unique index
+  /// is only meaningful if every caller does that, so no one may write it raw.
+  text    String  @unique @db.VarChar(191)
+  enabled Boolean @default(true)
+  notes   String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  runs     CrawlRun[]
+  products ProductKeyword[]
+
+  /// Matches SchedulerService's fan-out query: WHERE enabled = true
+  @@index([enabled])
+}
+
+/// Which keyword(s) surfaced which product, and where it ranked.
+///
+/// Many-to-many on purpose. A product legitimately ranks for several keywords
+/// ("mechanical keyboard" and "gaming keyboard" return the same board), so a
+/// scalar Product.keywordId would silently keep only whichever ran last and the
+/// results screen would under-report every overlap.
+model ProductKeyword {
+  productId   String
+  product     Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  keywordId   String
+  keyword     Keyword     @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  /// Denormalized from Product: lets the results screen filter by
+  /// (keyword, marketplace) without joining Product.
+  marketplace Marketplace
+  firstSeenAt DateTime    @default(now())
+  lastSeenAt  DateTime    @default(now())
+  /// 1-based position in the search results on the most recent run. Free to
+  /// capture (it is just the running item count) and the only way to answer
+  /// "did we slip off page 1 for this keyword".
+  lastRank    Int?
+
+  /// Composite PK, no surrogate id: the pair IS the identity, and the upsert in
+  /// CrawlRunnerService targets it.
+  @@id([productId, keywordId])
+  @@index([keywordId, marketplace])
+  @@index([keywordId, lastRank])
 }
 
 /// A product identity on a marketplace. Holds slow-changing metadata only.
@@ -75,6 +129,7 @@ model Product {
   snapshotCount Int      @default(0)
 
   snapshots PriceSnapshot[]
+  keywords  ProductKeyword[]
 
   /// Natural key: this pair IS the dedup strategy. Upserts target it.
   @@unique([marketplace, externalId])
@@ -119,16 +174,31 @@ model Category {
 /// DEFINITION of work: "track 'mechanical keyboard' on eBay, daily".
 /// Kept separate from CrawlRun because a collector re-runs the same definition
 /// on a schedule — that repetition is what produces the price series.
+///
+/// A KEYWORD_SWEEP job is the daily plan for ONE marketplace and ignores `query`,
+/// fanning out over every enabled Keyword instead — so the whole feature is three
+/// rows, not one per keyword per site. Staying per-marketplace keeps
+/// AdapterRegistry.resolve() and ListCrawlRunsDto.marketplace untouched, makes the
+/// outstanding-run guard per-marketplace (a walled Amazon can't stall eBay), and
+/// lets one site be disabled without touching the keyword list.
 model CrawlJob {
   id             String       @id @default(cuid())
   name           String       @db.VarChar(191)
   marketplace    Marketplace
   type           CrawlJobType
+  /// Ignored by KEYWORD_SWEEP jobs, which read Keyword rows instead.
   query          String?      @db.VarChar(191)
   /// string[] for PRODUCT_URLS jobs
   urls           Json?
+  /// How many search-result pages to walk. Operator's choice, per job.
   maxPages       Int          @default(3)
-  maxItems       Int          @default(100)
+  /// null = bounded only by maxPages.
+  ///
+  /// Nullable because otherwise the two limits silently contradict each other:
+  /// eBay serves 60 results per page, so any maxPages above 1 hits the old default
+  /// cap of 100 partway through and truncates the last page, with nothing in the
+  /// run to show it happened. Set null when maxPages should be the only bound.
+  maxItems       Int?
   /// null = manual trigger only
   cronExpression String?      @db.VarChar(191)
   enabled        Boolean      @default(true)
@@ -140,11 +210,23 @@ model CrawlJob {
   @@index([enabled, cronExpression])
 }
 
-/// One EXECUTION of a CrawlJob.
+/// One EXECUTION of a CrawlJob — for a KEYWORD_SWEEP, one keyword of one sweep.
 model CrawlRun {
   id           String     @id @default(cuid())
   jobId        String
   job          CrawlJob   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  /// Which keyword this run collected. Null for SEARCH / PRODUCT_URLS jobs, which
+  /// take their term from CrawlJob.query — that nullability is what lets this
+  /// migration be additive and leaves existing jobs working untouched.
+  keywordId    String?
+  keyword      Keyword?   @relation(fields: [keywordId], references: [id], onDelete: SetNull)
+  /// Groups the N runs produced by one cron fire.
+  ///
+  /// One column, and it is the difference between a readable history screen and an
+  /// unreadable one: a sweep of 20 keywords emits 20 runs per marketplace per day,
+  /// so without this the history is an undifferentiated wall of rows paginated 25
+  /// at a time. With it, "Amazon sweep, 2026-07-17: 19/20 succeeded" is one query.
+  batchId      String?    @db.VarChar(191)
   status       RunStatus  @default(QUEUED)
   trigger      RunTrigger
   startedAt    DateTime?
@@ -159,4 +241,6 @@ model CrawlRun {
 
   @@index([status, createdAt])
   @@index([jobId, createdAt])
+  @@index([keywordId, createdAt])
+  @@index([batchId])
 }

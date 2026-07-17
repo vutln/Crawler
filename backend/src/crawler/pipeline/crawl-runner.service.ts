@@ -114,7 +114,16 @@ export class CrawlRunnerService {
       query: job.query ?? undefined,
       urls: Array.isArray(job.urls) ? (job.urls as string[]) : undefined,
       maxPages: job.maxPages,
-      maxItems: job.maxItems,
+      /**
+       * null means "no item cap" — translated to Infinity here, at the one
+       * boundary where job config becomes crawl config.
+       *
+       * Every adapter already guards with `emitted >= ctx.maxItems`, which is
+       * correct against Infinity for free. Widening CrawlContext.maxItems to
+       * `number | null` instead would push a null check into 9 call sites across
+       * 5 adapters and buy nothing.
+       */
+      maxItems: job.maxItems ?? Number.POSITIVE_INFINITY,
       signal,
       logger,
     };

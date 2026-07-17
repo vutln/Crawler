@@ -13,7 +13,10 @@ import {
   type CrawlRun,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { CRAWL_QUEUE, type ICrawlQueue } from '../crawler/queue/crawl-queue.interface';
+import {
+  CRAWL_QUEUE,
+  type ICrawlQueue,
+} from '../crawler/queue/crawl-queue.interface';
 import { SchedulerService } from '../crawler/queue/scheduler.service';
 import { AdapterRegistry } from '../crawler/adapters/adapter.registry';
 import {
@@ -48,7 +51,9 @@ export class CrawlJobsService {
         marketplace: dto.marketplace,
         type: dto.type,
         query: dto.query ?? null,
-        urls: dto.urls ? (dto.urls as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
+        urls: dto.urls
+          ? (dto.urls as unknown as Prisma.InputJsonValue)
+          : Prisma.DbNull,
         maxPages: dto.maxPages,
         maxItems: dto.maxItems,
         cronExpression: dto.cronExpression ?? null,
@@ -98,10 +103,14 @@ export class CrawlJobsService {
       data: {
         ...(dto.name !== undefined && { name: dto.name }),
         ...(dto.query !== undefined && { query: dto.query }),
-        ...(dto.urls !== undefined && { urls: dto.urls as unknown as Prisma.InputJsonValue }),
+        ...(dto.urls !== undefined && {
+          urls: dto.urls as unknown as Prisma.InputJsonValue,
+        }),
         ...(dto.maxPages !== undefined && { maxPages: dto.maxPages }),
         ...(dto.maxItems !== undefined && { maxItems: dto.maxItems }),
-        ...(dto.cronExpression !== undefined && { cronExpression: dto.cronExpression }),
+        ...(dto.cronExpression !== undefined && {
+          cronExpression: dto.cronExpression,
+        }),
         ...(dto.enabled !== undefined && { enabled: dto.enabled }),
       },
     });
@@ -123,10 +132,15 @@ export class CrawlJobsService {
     if (!job) throw new NotFoundException(`Crawl job ${id} not found`);
 
     const outstanding = await this.prisma.crawlRun.count({
-      where: { jobId: id, status: { in: [RunStatus.QUEUED, RunStatus.RUNNING] } },
+      where: {
+        jobId: id,
+        status: { in: [RunStatus.QUEUED, RunStatus.RUNNING] },
+      },
     });
     if (outstanding > 0) {
-      throw new BadRequestException('This job already has a run queued or in progress');
+      throw new BadRequestException(
+        'This job already has a run queued or in progress',
+      );
     }
 
     const run = await this.prisma.crawlRun.create({

@@ -158,53 +158,82 @@ async function main(): Promise<void> {
   console.log('Seeding…');
 
   // Idempotent: wipe in FK-safe order so reseeding is always clean.
+  // ProductKeyword goes before Product and Keyword; CrawlRun before Keyword
+  // (its keywordId is SetNull, so a surviving run would silently lose its term).
   await prisma.priceSnapshot.deleteMany();
+  await prisma.productKeyword.deleteMany();
   await prisma.crawlRun.deleteMany();
   await prisma.product.deleteMany();
+  await prisma.keyword.deleteMany();
   await prisma.crawlJob.deleteMany();
   await prisma.category.deleteMany();
 
+  // The keyword list — this is what the config screen edits.
+  const keywords = await Promise.all(
+    ['mechanical keyboard', 'vintage film camera', 'handmade ceramic mug'].map((text) =>
+      prisma.keyword.create({ data: { text, enabled: true } }),
+    ),
+  );
+  console.log(`  ${keywords.length} keywords`);
+
+  /**
+   * One sweep job per marketplace, NOT one per keyword.
+   *
+   * This is the shape the whole feature turns on: keywords are data, sites are
+   * jobs. Three rows and three cron registrations cover any number of keywords,
+   * and adding a keyword causes no cron churn at all.
+   *
+   * maxItems: null because maxPages is the intended bound — eBay serves 60 per
+   * page, so any item cap below maxPages*60 silently truncates the last page.
+   */
   const jobs = await Promise.all([
     prisma.crawlJob.create({
       data: {
-        name: 'Mechanical keyboards (Amazon)',
+        name: 'Daily keyword sweep (Amazon)',
         marketplace: Marketplace.AMAZON,
-        type: CrawlJobType.SEARCH,
-        query: 'mechanical keyboard',
+        type: CrawlJobType.KEYWORD_SWEEP,
+        query: null,
         maxPages: 2,
-        maxItems: 50,
+        maxItems: null,
         cronExpression: '0 0 6 * * *', // daily 06:00
         enabled: true,
       },
     }),
     prisma.crawlJob.create({
       data: {
-        name: 'Vintage cameras (eBay)',
+        name: 'Daily keyword sweep (eBay)',
         marketplace: Marketplace.EBAY,
-        type: CrawlJobType.SEARCH,
-        query: 'vintage film camera',
+        type: CrawlJobType.KEYWORD_SWEEP,
+        query: null,
         maxPages: 2,
-        maxItems: 50,
-        cronExpression: '0 0 */6 * * *', // every 6h
+        maxItems: null,
+        cronExpression: '0 30 6 * * *', // daily 06:30 — stagger the marketplaces
         enabled: true,
       },
     }),
     prisma.crawlJob.create({
       data: {
-        name: 'Handmade ceramics (Etsy)',
+        name: 'Daily keyword sweep (Etsy)',
         marketplace: Marketplace.ETSY,
-        type: CrawlJobType.SEARCH,
-        query: 'handmade ceramic mug',
-        maxPages: 1,
-        maxItems: 25,
-        cronExpression: null, // manual only
+        type: CrawlJobType.KEYWORD_SWEEP,
+        query: null,
+        maxPages: 2,
+        maxItems: null,
+        cronExpression: '0 0 7 * * *', // daily 07:00
         enabled: true,
       },
     }),
   ]);
-  console.log(`  ${jobs.length} crawl jobs`);
+  console.log(`  ${jobs.length} crawl jobs (one sweep per marketplace)`);
 
   const jobByMarketplace = new Map(jobs.map((j) => [j.marketplace, j]));
+
+  /// Which demo keyword each marketplace's demo products came from.
+  const keywordByMarketplace = new Map([
+    [Marketplace.AMAZON, keywords[0]],
+    [Marketplace.EBAY, keywords[1]],
+    [Marketplace.ETSY, keywords[2]],
+  ]);
 
   // 30 days of history, one snapshot per day.
   const DAYS = 30;
@@ -213,13 +242,23 @@ async function main(): Promise<void> {
 
   let snapshotTotal = 0;
 
+  // One batch id per marketplace, mirroring what a single cron fire produces:
+  // N runs (one per keyword) that the history screen groups under one sweep.
+  const batchByMarketplace = new Map(
+    [...jobByMarketplace.keys()].map((m) => [m, `seed-${m.toLowerCase()}-batch`]),
+  );
+
+  let rank = 0;
   for (const spec of PRODUCTS) {
     const job = jobByMarketplace.get(spec.marketplace)!;
+    const keyword = keywordByMarketplace.get(spec.marketplace)!;
     const prices = priceWalk(spec.basePrice, DAYS, rand);
 
     const run = await prisma.crawlRun.create({
       data: {
         jobId: job.id,
+        keywordId: keyword.id,
+        batchId: batchByMarketplace.get(spec.marketplace),
         status: RunStatus.SUCCEEDED,
         trigger: RunTrigger.SCHEDULED,
         startedAt: new Date(now - 60_000),
@@ -251,6 +290,19 @@ async function main(): Promise<void> {
       },
     });
 
+    // The link the results screen filters on. Written in the real pipeline by
+    // CrawlRunnerService.upsert, inside the same transaction as the snapshot.
+    await prisma.productKeyword.create({
+      data: {
+        productId: product.id,
+        keywordId: keyword.id,
+        marketplace: spec.marketplace,
+        firstSeenAt: new Date(now - DAYS * 86_400_000),
+        lastRank: (rank % 12) + 1,
+      },
+    });
+    rank++;
+
     await prisma.priceSnapshot.createMany({
       data: prices.map((price, i) => ({
         productId: product.id,
@@ -272,6 +324,7 @@ async function main(): Promise<void> {
   await prisma.crawlRun.create({
     data: {
       jobId: jobByMarketplace.get(Marketplace.AMAZON)!.id,
+      keywordId: keywordByMarketplace.get(Marketplace.AMAZON)!.id,
       status: RunStatus.BLOCKED,
       trigger: RunTrigger.MANUAL,
       startedAt: new Date(now - 3_600_000),

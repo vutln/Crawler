@@ -61,13 +61,27 @@ export class CreateCrawlJobDto {
   @IsOptional()
   maxPages: number = 3;
 
-  @ApiPropertyOptional({ default: 100, minimum: 1, maximum: 1000, type: Number })
+  /**
+   * null = bounded only by maxPages.
+   *
+   * Worth setting null whenever maxPages > 1: eBay serves 60 results per page, so
+   * the old default of 100 silently truncated the second page part-way through and
+   * the run reported nothing unusual.
+   */
+  @ApiPropertyOptional({
+    default: null,
+    minimum: 1,
+    maximum: 1000,
+    type: Number,
+    nullable: true,
+    description: 'Hard cap on items collected. null = bounded only by maxPages.',
+  })
   @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(1000)
   @IsOptional()
-  maxItems: number = 100;
+  maxItems: number | null = null;
 
   @ApiPropertyOptional({
     description: 'Standard 5/6-field cron. Omit for manual-only. Example: "0 0 6 * * *" = daily 06:00',
@@ -91,7 +105,11 @@ export class UpdateCrawlJobDto {
   @IsArray() @IsUrl({}, { each: true }) @ArrayMaxSize(500) @IsOptional()
   urls?: string[];
   @ApiPropertyOptional() @Type(() => Number) @IsInt() @Min(1) @Max(20) @IsOptional() maxPages?: number;
-  @ApiPropertyOptional() @Type(() => Number) @IsInt() @Min(1) @Max(1000) @IsOptional() maxItems?: number;
+  /// null clears the cap (bounded only by maxPages). @IsOptional() skips the
+  /// validators for null as well as undefined, which is what makes that expressible.
+  @ApiPropertyOptional({ nullable: true })
+  @Type(() => Number) @IsInt() @Min(1) @Max(1000) @IsOptional()
+  maxItems?: number | null;
   @ApiPropertyOptional({ nullable: true }) @IsString() @IsOptional() cronExpression?: string | null;
   @ApiPropertyOptional()
   @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
@@ -109,7 +127,7 @@ export class CrawlJobDto {
   @ApiProperty({ nullable: true, type: String }) query!: string | null;
   @ApiProperty({ type: [String], nullable: true }) urls!: string[] | null;
   @ApiProperty() maxPages!: number;
-  @ApiProperty() maxItems!: number;
+  @ApiProperty({ nullable: true, type: Number }) maxItems!: number | null;
   @ApiProperty({ nullable: true, type: String }) cronExpression!: string | null;
   @ApiProperty() enabled!: boolean;
   @ApiProperty({ format: 'date-time' }) createdAt!: string;

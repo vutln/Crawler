@@ -37,14 +37,34 @@ export class CreateCrawlJobDto {
   @IsEnum(CrawlJobType)
   type!: CrawlJobType;
 
-  @ApiPropertyOptional({ description: 'Required for SEARCH jobs' })
-  // Conditional rather than blanket-optional: a SEARCH job with no query is
-  // invalid, and rejecting it here beats failing deep inside an adapter.
-  @ValidateIf((o: CreateCrawlJobDto) => o.type === CrawlJobType.SEARCH)
-  @IsString()
-  @MinLength(1)
-  @MaxLength(191)
-  query?: string;
+  // `query` is gone: what to search for lives in Keyword, and a KEYWORD_SWEEP job
+  // reads it from there. A per-job query used to produce runs with no keywordId,
+  // whose products no keyword pointed at — see the CrawlJobType comment in
+  // schema.prisma.
+
+  @ApiPropertyOptional({
+    default: true,
+    description:
+      'true = collect every enabled keyword, including ones added later. ' +
+      'false = collect only `keywordIds`.',
+  })
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean()
+  @IsOptional()
+  trackAllKeywords: boolean = true;
+
+  /**
+   * The explicit selection. Ignored when trackAllKeywords is true — sending both is
+   * not an error, it just means the list is stored and unused until you turn the
+   * flag off.
+   */
+  @ApiPropertyOptional({ type: [String], description: 'Required when trackAllKeywords is false' })
+  @ValidateIf((o: CreateCrawlJobDto) => o.trackAllKeywords === false)
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsString({ each: true })
+  @IsOptional()
+  keywordIds?: string[];
 
   @ApiPropertyOptional({ type: [String], description: 'Required for PRODUCT_URLS jobs' })
   @ValidateIf((o: CreateCrawlJobDto) => o.type === CrawlJobType.PRODUCT_URLS)
@@ -100,7 +120,14 @@ export class CreateCrawlJobDto {
 
 export class UpdateCrawlJobDto {
   @ApiPropertyOptional() @IsString() @MaxLength(191) @IsOptional() name?: string;
-  @ApiPropertyOptional() @IsString() @MaxLength(191) @IsOptional() query?: string;
+  @ApiPropertyOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean() @IsOptional()
+  trackAllKeywords?: boolean;
+  /** Replaces the selection wholesale — send the full list, not a delta. */
+  @ApiPropertyOptional({ type: [String] })
+  @IsArray() @ArrayMaxSize(500) @IsString({ each: true }) @IsOptional()
+  keywordIds?: string[];
   @ApiPropertyOptional({ type: [String] })
   @IsArray() @IsUrl({}, { each: true }) @ArrayMaxSize(500) @IsOptional()
   urls?: string[];
@@ -117,6 +144,14 @@ export class UpdateCrawlJobDto {
   enabled?: boolean;
 }
 
+/** Just enough of a Keyword to say what a job collects, without a second fetch. */
+export class KeywordRefDto {
+  @ApiProperty() id!: string;
+  @ApiProperty() text!: string;
+  @ApiProperty({ description: 'A disabled keyword is skipped even if this job selects it.' })
+  enabled!: boolean;
+}
+
 // See ProductDto for why these are @ApiProperty({nullable:true}) and not
 // @ApiPropertyOptional: the keys are always present, the values may be null.
 export class CrawlJobDto {
@@ -124,8 +159,14 @@ export class CrawlJobDto {
   @ApiProperty() name!: string;
   @ApiProperty({ enum: Marketplace, enumName: 'Marketplace' }) marketplace!: Marketplace;
   @ApiProperty({ enum: CrawlJobType, enumName: 'CrawlJobType' }) type!: CrawlJobType;
-  @ApiProperty({ nullable: true, type: String }) query!: string | null;
   @ApiProperty({ type: [String], nullable: true }) urls!: string[] | null;
+  @ApiProperty({ description: 'true = every enabled keyword, including future ones' })
+  trackAllKeywords!: boolean;
+  /**
+   * The job's explicit selection. EMPTY when trackAllKeywords is true — read the
+   * flag first, or you will render "0 keywords" for a job that collects them all.
+   */
+  @ApiProperty({ type: [KeywordRefDto] }) keywords!: KeywordRefDto[];
   @ApiProperty() maxPages!: number;
   @ApiProperty({ nullable: true, type: Number }) maxItems!: number | null;
   @ApiProperty({ nullable: true, type: String }) cronExpression!: string | null;
@@ -141,8 +182,8 @@ export class CrawlRunDto {
   @ApiProperty({ description: 'Denormalized for display' }) jobName!: string;
   @ApiProperty({ enum: Marketplace, enumName: 'Marketplace' }) marketplace!: Marketplace;
   /**
-   * The keyword this run collected. Null for legacy SEARCH/PRODUCT_URLS jobs,
-   * which take their term from the job itself.
+   * The keyword this run collected. Null only for PRODUCT_URLS runs, which
+   * re-check a fixed URL list and have no search term.
    */
   @ApiProperty({ nullable: true, type: String }) keyword!: string | null;
   /**

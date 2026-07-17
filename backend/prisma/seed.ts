@@ -192,7 +192,6 @@ async function main(): Promise<void> {
         name: 'Daily keyword sweep (Amazon)',
         marketplace: Marketplace.AMAZON,
         type: CrawlJobType.KEYWORD_SWEEP,
-        query: null,
         maxPages: 2,
         maxItems: null,
         cronExpression: '0 0 6 * * *', // daily 06:00
@@ -204,7 +203,6 @@ async function main(): Promise<void> {
         name: 'Daily keyword sweep (eBay)',
         marketplace: Marketplace.EBAY,
         type: CrawlJobType.KEYWORD_SWEEP,
-        query: null,
         maxPages: 2,
         maxItems: null,
         cronExpression: '0 30 6 * * *', // daily 06:30 — stagger the marketplaces
@@ -216,7 +214,6 @@ async function main(): Promise<void> {
         name: 'Daily keyword sweep (Etsy)',
         marketplace: Marketplace.ETSY,
         type: CrawlJobType.KEYWORD_SWEEP,
-        query: null,
         maxPages: 2,
         maxItems: null,
         cronExpression: '0 0 7 * * *', // daily 07:00

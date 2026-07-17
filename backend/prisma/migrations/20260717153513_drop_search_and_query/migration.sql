@@ -1,0 +1,21 @@
+-- Drop CrawlJob.query and the SEARCH / CATEGORY job types.
+--
+-- DESTRUCTIVE BY INTENT. Safe here because both values were verified unused first:
+-- the one SEARCH job and the 32 products it had collected were deleted before this
+-- ran, and no row ever used CATEGORY.
+--
+-- Why:
+--   query   — what to search for now lives in Keyword, in exactly one place. A
+--             per-job query was the previous model, and keeping both meant a job
+--             could collect products that no keyword pointed at, invisible to the
+--             results screen's keyword filter. That is what happened: 32 of 38
+--             products were orphaned this way.
+--   SEARCH  — superseded by KEYWORD_SWEEP, which carries a keywordId on every run.
+--   CATEGORY— never functioned: no adapter branched on it, so it fell through to
+--             search() and threw for want of a query. Dropping `query` would have
+--             made that permanent rather than merely useless.
+--
+-- Recovery: none needed. Nothing reads `query`, and re-adding a job type is a
+-- one-line enum change.
+ALTER TABLE `crawljob` DROP COLUMN `query`,
+    MODIFY `type` ENUM('KEYWORD_SWEEP', 'PRODUCT_URLS') NOT NULL;

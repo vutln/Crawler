@@ -26,12 +26,23 @@ enum Marketplace {
 }
 
 enum CrawlJobType {
-  SEARCH
-  PRODUCT_URLS
-  CATEGORY
   /// Fans out over every enabled Keyword — see the CrawlJob doc comment.
   KEYWORD_SWEEP
+  /// Re-checks a fixed list of product URLs. Takes `urls`, never a search term.
+  PRODUCT_URLS
 }
+
+// SEARCH and CATEGORY were removed here, deliberately:
+//
+// SEARCH held one query per job, which is the model Keyword replaces — and it was
+// actively harmful once ProductKeyword existed, because its runs carried no
+// keyword, so everything it collected was invisible to the results screen's
+// keyword filter. Two ways to say "collect this term", one of which produced
+// second-class data.
+//
+// CATEGORY never worked: no adapter ever branched on it, so it fell through to
+// search() and threw for want of a query. Dropping `query` would have made that
+// permanent rather than merely useless.
 
 enum RunStatus {
   QUEUED
@@ -66,9 +77,22 @@ model Keyword {
 
   runs     CrawlRun[]
   products ProductKeyword[]
+  jobs     CrawlJobKeyword[]
 
   /// Matches SchedulerService's fan-out query: WHERE enabled = true
   @@index([enabled])
+}
+
+/// Which keywords a specific sweep collects — only consulted when the job has
+/// trackAllKeywords = false. See CrawlJob.
+model CrawlJobKeyword {
+  jobId     String
+  job       CrawlJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  keywordId String
+  keyword   Keyword  @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+
+  @@id([jobId, keywordId])
+  @@index([keywordId])
 }
 
 /// Which keyword(s) surfaced which product, and where it ranked.
@@ -175,21 +199,38 @@ model Category {
 /// Kept separate from CrawlRun because a collector re-runs the same definition
 /// on a schedule — that repetition is what produces the price series.
 ///
-/// A KEYWORD_SWEEP job is the daily plan for ONE marketplace and ignores `query`,
-/// fanning out over every enabled Keyword instead — so the whole feature is three
-/// rows, not one per keyword per site. Staying per-marketplace keeps
-/// AdapterRegistry.resolve() and ListCrawlRunsDto.marketplace untouched, makes the
-/// outstanding-run guard per-marketplace (a walled Amazon can't stall eBay), and
-/// lets one site be disabled without touching the keyword list.
+/// A KEYWORD_SWEEP job is the daily plan for ONE marketplace, fanning out over the
+/// keywords it tracks — so the whole feature is three rows, not one per keyword per
+/// site. Staying per-marketplace keeps AdapterRegistry.resolve() and
+/// ListCrawlRunsDto.marketplace untouched, makes the outstanding-run guard
+/// per-marketplace (a walled Amazon can't stall eBay), and lets one site be
+/// disabled without touching the keyword list.
+///
+/// There is deliberately no `query` column: what to search for lives in Keyword,
+/// and exactly one place. A per-job query was the old model, and keeping both
+/// meant a job could collect products that no keyword pointed at — see the
+/// CrawlJobType comment.
 model CrawlJob {
   id             String       @id @default(cuid())
   name           String       @db.VarChar(191)
   marketplace    Marketplace
   type           CrawlJobType
-  /// Ignored by KEYWORD_SWEEP jobs, which read Keyword rows instead.
-  query          String?      @db.VarChar(191)
   /// string[] for PRODUCT_URLS jobs
   urls           Json?
+
+  /// true  = collect every enabled Keyword, including ones added later.
+  /// false = collect only the keywords in `keywords` below.
+  ///
+  /// An explicit flag rather than inferring "no rows means all", because those two
+  /// states are genuinely different intentions and a DB that cannot tell them apart
+  /// silently picks one. "I want everything" and "I haven't chosen yet / I chose
+  /// nothing" look identical in an empty join table.
+  ///
+  /// Defaults true so adding a keyword collects tomorrow without touching a job —
+  /// the un-surprising default, and what makes this migration additive.
+  trackAllKeywords Boolean @default(true)
+  /// The explicit selection. Ignored entirely when trackAllKeywords is true.
+  keywords         CrawlJobKeyword[]
   /// How many search-result pages to walk. Operator's choice, per job.
   maxPages       Int          @default(3)
   /// null = bounded only by maxPages.

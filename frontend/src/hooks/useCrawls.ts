@@ -12,6 +12,7 @@ import {
   listCrawlJobs,
   listCrawlRuns,
   triggerCrawl,
+  updateCrawlJob,
 } from '@/api/endpoints';
 import { ApiError } from '@/api/http';
 import { queryKeys } from '@/api/queryKeys';
@@ -21,6 +22,7 @@ import type {
   CrawlRun,
   CrawlRunListQuery,
   CreateCrawlJobInput,
+  UpdateCrawlJobInput,
   PaginatedCrawlRuns,
 } from '@/types/api';
 
@@ -85,6 +87,15 @@ export function useTriggerCrawl() {
             jobId,
             jobName: job.name,
             marketplace: job.marketplace,
+            // Both genuinely unknown here, and null says so.
+            //
+            // A manual trigger of a KEYWORD_SWEEP fans out server-side into one run
+            // PER KEYWORD, so there is no single keyword to name and no batch id
+            // until the server has made them. Guessing either would be exactly the
+            // "confidently wrong badge" the comment above rejects; the real rows
+            // arrive on the next poll ~2s later.
+            keyword: null,
+            batchId: null,
             status: 'QUEUED',
             trigger: 'MANUAL',
             startedAt: null,
@@ -140,6 +151,18 @@ export function useCreateCrawlJob() {
     onSuccess: (job) => toast.success(`Created "${job.name}"`),
     onError: (error) =>
       toast.error(error instanceof ApiError ? error.message : 'Failed to create job'),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.crawlJobs.all }),
+  });
+}
+
+export function useUpdateCrawlJob() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: UpdateCrawlJobInput & { id: string }) =>
+      updateCrawlJob(id, body),
+    onSuccess: (job) => toast.success(`Saved "${job.name}"`),
+    onError: (error) =>
+      toast.error(error instanceof ApiError ? error.message : 'Failed to save job'),
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.crawlJobs.all }),
   });
 }

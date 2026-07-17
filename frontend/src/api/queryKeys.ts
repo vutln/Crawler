@@ -9,6 +9,10 @@ export const queryKeys = {
     priceHistory: (id: string, range: string) =>
       ['products', 'detail', id, 'price-history', range] as const,
   },
+  keywords: {
+    all: ['keywords'] as const,
+    list: () => ['keywords', 'list'] as const,
+  },
   crawlJobs: {
     all: ['crawl-jobs'] as const,
     list: () => ['crawl-jobs', 'list'] as const,

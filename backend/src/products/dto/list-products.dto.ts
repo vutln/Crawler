@@ -1,4 +1,4 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
@@ -75,6 +75,18 @@ export class ListProductsDto {
   @IsOptional()
   inStock?: boolean;
 
+  /**
+   * Only products this keyword surfaced, on any marketplace.
+   *
+   * Not validated against the Keyword table on purpose: an unknown id simply
+   * matches nothing, which degrades to an empty list rather than a 400. A
+   * hand-edited URL should show "no results", not an error page.
+   */
+  @ApiPropertyOptional({ description: 'Only products surfaced by this keyword' })
+  @IsString()
+  @IsOptional()
+  keywordId?: string;
+
   @ApiPropertyOptional({
     enum: ProductSortBy,
     enumName: 'ProductSortBy',
@@ -89,3 +101,20 @@ export class ListProductsDto {
   @IsOptional()
   sortOrder: SortOrder = SortOrder.Desc;
 }
+
+/**
+ * Everything list() filters on, minus paging.
+ *
+ * OmitType from @nestjs/swagger (already a dependency — no new package) so the
+ * export inherits every current AND future filter for free. Hand-copying the
+ * fields is how the CSV and the screen start disagreeing about what "the current
+ * filter" means.
+ *
+ * page/pageSize are dropped deliberately: "export what I filtered" is the whole
+ * expectation, and exporting only the page the user happens to be on is the most
+ * common way this feature is built wrong.
+ */
+export class ExportProductsDto extends OmitType(ListProductsDto, ['page', 'pageSize'] as const) {}
+
+/** What buildWhere() needs — satisfied by both the list and the export DTOs. */
+export type ProductFilters = Omit<ListProductsDto, 'page' | 'pageSize' | 'sortBy' | 'sortOrder'>;

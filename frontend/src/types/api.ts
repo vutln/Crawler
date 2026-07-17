@@ -20,11 +20,25 @@ export type CrawlJob = components['schemas']['CrawlJobDto'];
 export type CrawlRun = components['schemas']['CrawlRunDto'];
 export type PaginatedCrawlRuns = components['schemas']['PaginatedCrawlRunsDto'];
 export type CreateCrawlJobInput = components['schemas']['CreateCrawlJobDto'];
+export type UpdateCrawlJobInput = components['schemas']['UpdateCrawlJobDto'];
+export type Keyword = components['schemas']['KeywordDto'];
+export type CreateKeywordInput = components['schemas']['CreateKeywordDto'];
+export type UpdateKeywordInput = components['schemas']['UpdateKeywordDto'];
+export type BulkCreateKeywordsResult = components['schemas']['BulkCreateKeywordsResultDto'];
+export type RunKeywordResult = components['schemas']['RunKeywordResultDto'];
 export type StatsOverview = components['schemas']['StatsOverviewDto'];
 export type MarketplaceStat = components['schemas']['MarketplaceStatDto'];
 
 // Renaming a controller method breaks these loudly, here, in one file.
 export type ProductListQuery = NonNullable<operations['ProductsController_list']['parameters']['query']>;
+/**
+ * The list query minus paging — the backend derives it from ListProductsDto via
+ * OmitType, so it tracks every filter automatically. Taken from the generated
+ * operation rather than hand-written for exactly that reason.
+ */
+export type ProductExportQuery = NonNullable<
+  operations['ProductsController_exportCsv']['parameters']['query']
+>;
 export type CrawlRunListQuery = NonNullable<operations['CrawlRunsController_list']['parameters']['query']>;
 
 /** Hand-written: @ApiQuery on a bare param widens to `string` in the spec. */

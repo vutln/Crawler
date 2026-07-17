@@ -1,4 +1,4 @@
-import { Button } from './primitives';
+import { Button } from './Button';
 
 export function Pagination({
   page,

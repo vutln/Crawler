@@ -1,11 +1,23 @@
-import { Button, Card, EmptyState, ErrorState, JobStatusBadge, SiteBadge, Spinner } from '@/components/ui';
+import { useState } from 'react';
+import { Button, Card, EmptyState, ErrorState, JobStatusBadge, Modal, SiteBadge, Spinner } from '@/components/ui';
 import { useCrawlJobs, useDeleteCrawlJob, useTriggerCrawl } from '@/hooks/useCrawls';
+import { useKeywords } from '@/hooks/useKeywords';
 import { formatRelative } from '@/lib/utils';
+import { JobForm } from './JobForm';
 
 export function JobsTable() {
   const jobs = useCrawlJobs();
   const trigger = useTriggerCrawl();
   const remove = useDeleteCrawlJob();
+  // Track the id, not the job object: the list polls every 2–15s, and holding a
+  // snapshot would silently edit a stale copy.
+  const [editing, setEditing] = useState<string | null>(null);
+  const editingJob = jobs.data?.find((j) => j.id === editing) ?? null;
+
+  // What a sweep will actually collect. Undefined while loading — the cell falls
+  // back to prose rather than flashing a wrong count.
+  const keywords = useKeywords();
+  const enabledKeywords = keywords.data?.filter((k) => k.enabled).length;
 
   return (
     <Card>
@@ -36,7 +48,8 @@ export function JobsTable() {
               <tr className="text-left text-[11px] text-slate-500">
                 <th className="px-3 py-2 font-medium">Name</th>
                 <th className="px-3 py-2 font-medium">Site</th>
-                <th className="px-3 py-2 font-medium">Query</th>
+                {/* Was "Query" — a sweep has no query; it collects the keyword list. */}
+                <th className="px-3 py-2 font-medium">Collects</th>
                 <th className="px-3 py-2 font-medium">Schedule</th>
                 <th className="px-3 py-2 font-medium">Last run</th>
                 <th className="px-3 py-2 text-right font-medium">Actions</th>
@@ -49,8 +62,34 @@ export function JobsTable() {
                   <td className="px-3 py-1.5">
                     <SiteBadge marketplace={job.marketplace} />
                   </td>
+                  {/*
+                    Say what the job actually does. This read `job.query ?? \`${urls} URLs\``,
+                    so a sweep — which has no query and no urls — rendered the
+                    meaningless "0 URLs" and never mentioned keywords at all.
+
+                    Read trackAllKeywords FIRST: a track-all job's `keywords` array is
+                    empty by design, so counting it would report "0 keywords" for the
+                    job that collects every one of them.
+                  */}
                   <td className="px-3 py-1.5 text-slate-600">
-                    {job.query ?? `${job.urls?.length ?? 0} URLs`}
+                    {job.type !== 'KEYWORD_SWEEP' ? (
+                      `${job.urls?.length ?? 0} URLs`
+                    ) : job.trackAllKeywords ? (
+                      <span title="Keywords added later are collected automatically">
+                        All keywords
+                        {enabledKeywords !== undefined && (
+                          <span className="text-slate-400"> ({enabledKeywords})</span>
+                        )}
+                        <span className="text-slate-400"> · {job.maxPages}p each</span>
+                      </span>
+                    ) : (
+                      <span title={job.keywords.map((k) => k.text).join(', ') || 'nothing selected'}>
+                        <span className={job.keywords.length === 0 ? 'text-amber-700' : undefined}>
+                          {job.keywords.length} selected
+                        </span>
+                        <span className="text-slate-400"> · {job.maxPages}p each</span>
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-1.5 font-mono text-[11px] text-slate-500">
                     {job.cronExpression ?? 'manual'}
@@ -80,6 +119,15 @@ export function JobsTable() {
                       size="sm"
                       variant="ghost"
                       className="ml-1"
+                      onClick={() => setEditing(job.id)}
+                      testId={`edit-${job.id}`}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="ml-1"
                       onClick={() => {
                         if (confirm(`Delete "${job.name}" and all its runs?`)) {
                           remove.mutate(job.id);
@@ -94,6 +142,24 @@ export function JobsTable() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {/*
+        Mounted only while editing, so the form re-seeds from the job each time it
+        opens. <dialog> keeps children in the DOM regardless, so a persistently
+        mounted form would reopen holding the PREVIOUS job's edits — and JobForm
+        reads its props into state on first render only.
+      */}
+      {editingJob && (
+        <Modal
+          open
+          onClose={() => setEditing(null)}
+          title={`Edit "${editingJob.name}"`}
+          description="Changes apply to the next run. Site can't be changed after creation."
+          testId="job-modal"
+        >
+          <JobForm job={editingJob} onDone={() => setEditing(null)} />
+        </Modal>
       )}
     </Card>
   );

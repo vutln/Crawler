@@ -21,6 +21,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/products/export.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export the current product filter as CSV
+         * @description Takes the same filters as GET /products, minus paging: you get everything matching, not the page you happen to be on. Streamed, so an export of any size holds constant memory.
+         */
+        get: operations["ProductsController_exportCsv"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/products/{id}": {
         parameters: {
             query?: never;
@@ -56,6 +76,91 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/keywords": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List every tracked keyword
+         * @description The daily sweep runs each ENABLED keyword against all three marketplaces. Adding one here changes what tomorrow collects; no job or cron edit is needed.
+         */
+        get: operations["KeywordsController_findAll"];
+        put?: never;
+        /** Add one keyword */
+        post: operations["KeywordsController_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/keywords/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add many keywords at once (paste a list)
+         * @description Terms already in the list are SKIPPED, not rejected — pasting 50 keywords of which 3 exist is a success, and the response reports exactly what happened. Text is normalized (trimmed, whitespace collapsed, lowercased) before comparison.
+         */
+        post: operations["KeywordsController_bulkCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/keywords/{id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Collect this one keyword now, across every enabled sweep
+         * @description Queues one run per marketplace and returns immediately — poll /crawl-runs, or filter them by the returned batchId. A marketplace whose sweep already has work outstanding is skipped rather than piled onto, and reported in `skipped`. Runs carry this keywordId, so what they collect is linked exactly as the daily sweep would link it.
+         */
+        post: operations["KeywordsController_runNow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/keywords/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["KeywordsController_findOne"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a keyword
+         * @description Removes the keyword and its product links. Products and their price history are NOT deleted — that series is the point of the project and outlives the search term.
+         */
+        delete: operations["KeywordsController_remove"];
+        options?: never;
+        head?: never;
+        /**
+         * Rename a keyword, or enable/disable it
+         * @description Disabling keeps the keyword and its collected links but skips it in the sweep. Prefer it to deletion when you only want to stop collecting.
+         */
+        patch: operations["KeywordsController_update"];
         trace?: never;
     };
     "/api/crawl-jobs": {
@@ -250,8 +355,65 @@ export interface components {
             currency: string;
             inStock: boolean;
         };
+        KeywordDto: {
+            id: string;
+            text: string;
+            enabled: boolean;
+            notes: string | null;
+            createdAt: string;
+            /** @description How many products this keyword has surfaced, across every marketplace. */
+            productCount: number;
+        };
+        CreateKeywordDto: {
+            /** @example mechanical keyboard */
+            text: string;
+            /**
+             * @description Disabled keywords stay in the list but are skipped by the daily sweep.
+             * @default true
+             */
+            enabled: boolean;
+            notes?: string | null;
+        };
+        BulkCreateKeywordsDto: {
+            /**
+             * @description Normalized and de-duplicated server-side; order is preserved.
+             * @example [
+             *       "mechanical keyboard",
+             *       "harry potter shirt",
+             *       "vintage film camera"
+             *     ]
+             */
+            keywords: string[];
+        };
+        BulkCreateKeywordsResultDto: {
+            created: components["schemas"]["KeywordDto"][];
+            /** @description Submitted terms already in the list, after normalization. */
+            skipped: string[];
+            /** @description Terms that collapsed to a duplicate of another term in the same paste. */
+            duplicates: string[];
+        };
+        RunKeywordResultDto: {
+            /** @description Groups the runs this trigger produced. */
+            batchId: string;
+            marketplaces: components["schemas"]["Marketplace"][];
+            /** @description One run per marketplace that had capacity. */
+            queued: number;
+            /** @description Marketplaces skipped because that sweep already had work outstanding. */
+            skipped: string[];
+        };
+        UpdateKeywordDto: {
+            text?: string;
+            enabled?: boolean;
+            notes?: string | null;
+        };
         /** @enum {string} */
-        CrawlJobType: "SEARCH" | "PRODUCT_URLS" | "CATEGORY";
+        CrawlJobType: "KEYWORD_SWEEP" | "PRODUCT_URLS";
+        KeywordRefDto: {
+            id: string;
+            text: string;
+            /** @description A disabled keyword is skipped even if this job selects it. */
+            enabled: boolean;
+        };
         /** @enum {string} */
         RunStatus: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "BLOCKED";
         /** @enum {string} */
@@ -262,6 +424,16 @@ export interface components {
             /** @description Denormalized for display */
             jobName: string;
             marketplace: components["schemas"]["Marketplace"];
+            /**
+             * @description The keyword this run collected. Null only for PRODUCT_URLS runs, which
+             *     re-check a fixed URL list and have no search term.
+             */
+            keyword: string | null;
+            /**
+             * @description Groups the runs one sweep produced. Without it a 20-keyword sweep is 20
+             *     undifferentiated rows in a list paginated at 25.
+             */
+            batchId: string | null;
             status: components["schemas"]["RunStatus"];
             trigger: components["schemas"]["RunTrigger"];
             /** Format: date-time */
@@ -283,10 +455,16 @@ export interface components {
             name: string;
             marketplace: components["schemas"]["Marketplace"];
             type: components["schemas"]["CrawlJobType"];
-            query: string | null;
             urls: string[] | null;
+            /** @description true = every enabled keyword, including future ones */
+            trackAllKeywords: boolean;
+            /**
+             * @description The job's explicit selection. EMPTY when trackAllKeywords is true — read the
+             *     flag first, or you will render "0 keywords" for a job that collects them all.
+             */
+            keywords: components["schemas"]["KeywordRefDto"][];
             maxPages: number;
-            maxItems: number;
+            maxItems: number | null;
             cronExpression: string | null;
             enabled: boolean;
             /** Format: date-time */
@@ -299,14 +477,22 @@ export interface components {
             name: string;
             marketplace: components["schemas"]["Marketplace"];
             type: components["schemas"]["CrawlJobType"];
-            /** @description Required for SEARCH jobs */
-            query?: string;
+            /**
+             * @description true = collect every enabled keyword, including ones added later. false = collect only `keywordIds`.
+             * @default true
+             */
+            trackAllKeywords: boolean;
+            /** @description Required when trackAllKeywords is false */
+            keywordIds?: string[];
             /** @description Required for PRODUCT_URLS jobs */
             urls?: string[];
             /** @default 3 */
             maxPages: number;
-            /** @default 100 */
-            maxItems: number;
+            /**
+             * @description Hard cap on items collected. null = bounded only by maxPages.
+             * @default null
+             */
+            maxItems: number | null;
             /**
              * @description Standard 5/6-field cron. Omit for manual-only. Example: "0 0 6 * * *" = daily 06:00
              * @example 0 0 6 * * *
@@ -317,10 +503,12 @@ export interface components {
         };
         UpdateCrawlJobDto: {
             name?: string;
-            query?: string;
+            trackAllKeywords?: boolean;
+            /** @description Replaces the selection wholesale — send the full list, not a delta. */
+            keywordIds?: string[];
             urls?: string[];
             maxPages?: number;
-            maxItems?: number;
+            maxItems?: number | null;
             cronExpression?: string | null;
             enabled?: boolean;
         };
@@ -383,6 +571,8 @@ export interface operations {
                 minPrice?: number;
                 maxPrice?: number;
                 inStock?: boolean;
+                /** @description Only products surfaced by this keyword */
+                keywordId?: string;
                 sortBy?: components["schemas"]["ProductSortBy"];
                 sortOrder?: components["schemas"]["SortOrder"];
             };
@@ -399,6 +589,36 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PaginatedProductsDto"];
                 };
+            };
+        };
+    };
+    ProductsController_exportCsv: {
+        parameters: {
+            query?: {
+                /** @description Substring match on title */
+                search?: string;
+                marketplace?: components["schemas"]["Marketplace"];
+                /** @description Filter on latest known price */
+                minPrice?: number;
+                maxPrice?: number;
+                inStock?: boolean;
+                /** @description Only products surfaced by this keyword */
+                keywordId?: string;
+                sortBy?: components["schemas"]["ProductSortBy"];
+                sortOrder?: components["schemas"]["SortOrder"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description CSV file (UTF-8 with BOM, CRLF) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -447,6 +667,171 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PricePointDto"][];
                 };
+            };
+        };
+    };
+    KeywordsController_findAll: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeywordDto"][];
+                };
+            };
+        };
+    };
+    KeywordsController_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateKeywordDto"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeywordDto"];
+                };
+            };
+            /** @description A keyword with the same normalized text already exists. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    KeywordsController_bulkCreate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkCreateKeywordsDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkCreateKeywordsResultDto"];
+                };
+            };
+        };
+    };
+    KeywordsController_runNow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunKeywordResultDto"];
+                };
+            };
+        };
+    };
+    KeywordsController_findOne: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeywordDto"];
+                };
+            };
+        };
+    };
+    KeywordsController_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    KeywordsController_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateKeywordDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeywordDto"];
+                };
+            };
+            /** @description The new text collides with an existing keyword. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -586,6 +971,10 @@ export interface operations {
                 status?: components["schemas"]["RunStatus"];
                 marketplace?: components["schemas"]["Marketplace"];
                 jobId?: string;
+                /** @description "Show me every run that collected this keyword" — across all marketplaces. */
+                keywordId?: string;
+                /** @description "Show me one sweep" — the N runs a single cron fire produced. */
+                batchId?: string;
             };
             header?: never;
             path?: never;

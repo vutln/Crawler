@@ -10,6 +10,7 @@ import {
   Post,
 } from '@nestjs/common';
 import {
+  ApiAcceptedResponse,
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiNoContentResponse,
@@ -22,6 +23,7 @@ import {
   BulkCreateKeywordsResultDto,
   CreateKeywordDto,
   KeywordDto,
+  RunKeywordResultDto,
   UpdateKeywordDto,
 } from './dto/keyword.dto';
 import { KeywordsService } from './keywords.service';
@@ -65,6 +67,22 @@ export class KeywordsController {
   // created resource, and there is no one Location to point at.
   bulkCreate(@Body() dto: BulkCreateKeywordsDto): Promise<BulkCreateKeywordsResultDto> {
     return this.keywords.bulkCreate(dto);
+  }
+
+  @Post(':id/run')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Collect this one keyword now, across every enabled sweep',
+    description:
+      'Queues one run per marketplace and returns immediately — poll /crawl-runs, ' +
+      'or filter them by the returned batchId. A marketplace whose sweep already ' +
+      'has work outstanding is skipped rather than piled onto, and reported in ' +
+      '`skipped`. Runs carry this keywordId, so what they collect is linked exactly ' +
+      'as the daily sweep would link it.',
+  })
+  @ApiAcceptedResponse({ type: RunKeywordResultDto })
+  runNow(@Param('id') id: string): Promise<RunKeywordResultDto> {
+    return this.keywords.runNow(id);
   }
 
   @Get(':id')

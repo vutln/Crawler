@@ -1,7 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { once } from 'node:events';
+import type { Writable } from 'node:stream';
 import { Prisma, type Product } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { ListProductsDto } from './dto/list-products.dto';
+import { csvRow, UTF8_BOM } from './csv';
+import {
+  ExportProductsDto,
+  ListProductsDto,
+  type ProductFilters,
+} from './dto/list-products.dto';
 import {
   PriceHistoryInterval,
   type PaginatedProductsDto,
@@ -14,16 +21,57 @@ function decimalToNumber(value: Prisma.Decimal | null): number | null {
   return value === null ? null : value.toNumber();
 }
 
+/** Requirement fields first, then traceability, then identity. */
+const CSV_COLUMNS = [
+  'keyword',
+  'marketplace',
+  'title',
+  'imageUrl',
+  'price',
+  'currency',
+  'reviewCount',
+  'rating',
+  'inStock',
+  'rank',
+  'url',
+  'externalId',
+  'firstSeenAt',
+  'lastScrapedAt',
+] as const;
+
+/**
+ * Rows per DB round-trip while streaming.
+ *
+ * Keyset pagination, so this bounds MEMORY, not the export: 1000 rows are built,
+ * written, and released before the next batch is read. The export stays flat
+ * regardless of whether it returns 50 rows or 500,000.
+ */
+const CSV_BATCH_SIZE = 1000;
+
 @Injectable()
 export class ProductsService {
+  private readonly logger = new Logger(ProductsService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(query: ListProductsDto): Promise<PaginatedProductsDto> {
+  /**
+   * The one definition of "which products match these filters".
+   *
+   * Extracted so list() and streamCsv() cannot drift. That is the entire point of
+   * the export: the operator filters the screen, hits Export, and gets THOSE rows.
+   * If the two ever built their own WHERE, the CSV would quietly stop matching what
+   * the user was looking at — and nothing would fail, so nobody would find out.
+   */
+  private buildWhere(query: ProductFilters): Prisma.ProductWhereInput {
     const where: Prisma.ProductWhereInput = {};
 
     if (query.search) where.title = { contains: query.search };
     if (query.marketplace) where.marketplace = query.marketplace;
     if (query.inStock !== undefined) where.inStock = query.inStock;
+
+    // The keyword that surfaced the product. `some` because ProductKeyword is a
+    // many-to-many: one product legitimately ranks for several keywords.
+    if (query.keywordId) where.keywords = { some: { keywordId: query.keywordId } };
 
     if (query.minPrice !== undefined || query.maxPrice !== undefined) {
       where.currentPrice = {
@@ -31,6 +79,12 @@ export class ProductsService {
         ...(query.maxPrice !== undefined && { lte: new Prisma.Decimal(query.maxPrice) }),
       };
     }
+
+    return where;
+  }
+
+  async list(query: ListProductsDto): Promise<PaginatedProductsDto> {
+    const where = this.buildWhere(query);
 
     const orderBy: Prisma.ProductOrderByWithRelationInput =
       query.sortBy === 'price'
@@ -56,6 +110,126 @@ export class ProductsService {
       page: query.page,
       pageSize: query.pageSize,
     };
+  }
+
+  /**
+   * Stream the current filter as CSV.
+   *
+   * Streamed, not buffered, and that is not premature: a 20-keyword sweep across 3
+   * marketplaces at ~120 listings each is ~7,000 products, and the table only grows.
+   * Buffering means a full findMany in memory plus a multi-megabyte string — one
+   * export pins the heap and two concurrent ones can OOM the process. Streaming
+   * holds one batch at a time regardless of size.
+   *
+   * Reuses buildWhere(), so the CSV is exactly what the screen was showing.
+   */
+  async streamCsv(query: ExportProductsDto, out: Writable): Promise<void> {
+    const where = this.buildWhere(query);
+
+    // Excel decodes the file as the system codepage without this, turning every
+    // accented or CJK title into mojibake. Must be the first bytes on the wire.
+    await this.write(out, UTF8_BOM + csvRow([...CSV_COLUMNS]));
+
+    let cursor: string | undefined;
+    let rows = 0;
+
+    for (;;) {
+      /**
+       * Keyset pagination (cursor on id), not skip/take.
+       *
+       * OFFSET makes the database walk and discard every preceding row, so batch N
+       * costs O(N * batchSize) and a large export degrades quadratically. A cursor
+       * is an indexed seek — every batch costs the same. It also cannot skip or
+       * duplicate rows if a concurrent crawl inserts mid-export, which OFFSET can.
+       */
+      const batch = await this.prisma.product.findMany({
+        where,
+        orderBy: { id: 'asc' },
+        take: CSV_BATCH_SIZE,
+        ...(cursor && { cursor: { id: cursor }, skip: 1 }),
+        include: {
+          keywords: {
+            select: { lastRank: true, keyword: { select: { id: true, text: true } } },
+          },
+        },
+      });
+
+      if (batch.length === 0) break;
+
+      let chunk = '';
+      for (const product of batch) {
+        chunk += this.toCsvRow(product, query.keywordId);
+      }
+      await this.write(out, chunk);
+
+      rows += batch.length;
+      cursor = batch[batch.length - 1].id;
+      if (batch.length < CSV_BATCH_SIZE) break;
+    }
+
+    this.logger.log(`Exported ${rows} product(s) as CSV`);
+    out.end();
+  }
+
+  /**
+   * Write, honouring backpressure.
+   *
+   * res.write() returning false means the socket's buffer is full; ignoring it and
+   * writing anyway just moves the whole file into Node's memory, which defeats the
+   * streaming entirely. Waiting for 'drain' is what keeps this flat.
+   */
+  private async write(out: Writable, data: string): Promise<void> {
+    if (!out.write(data)) await once(out, 'drain');
+  }
+
+  private toCsvRow(
+    product: Product & {
+      keywords: Array<{ lastRank: number | null; keyword: { id: string; text: string } }>;
+    },
+    filteredKeywordId?: string,
+  ): string {
+    /**
+     * Which keyword's rank to report.
+     *
+     * Filtered: that keyword's — the product's position for some other term is not
+     * what the operator asked about.
+     *
+     * Unfiltered: only when the answer is unambiguous, i.e. the product was
+     * surfaced by exactly one keyword. A product ranking for three terms has three
+     * ranks, and picking one arbitrarily would be a number that looks authoritative
+     * and means nothing. Empty is the honest answer there, and the keyword column
+     * shows all three so it is obvious why.
+     */
+    const match = filteredKeywordId
+      ? product.keywords.find((k) => k.keyword.id === filteredKeywordId)
+      : product.keywords.length === 1
+        ? product.keywords[0]
+        : undefined;
+
+    const keywordText = filteredKeywordId
+      ? (match?.keyword.text ?? '')
+      : product.keywords.map((k) => k.keyword.text).join(' | ');
+
+    return csvRow([
+      keywordText,
+      product.marketplace,
+      product.title,
+      product.imageUrl,
+      // decimalToNumber, never the Decimal: it stringifies to [object Object].
+      decimalToNumber(product.currentPrice),
+      // Always beside the price. After the currency work, USD is not guaranteed —
+      // a price column without a currency column is the same lie normalizeCurrency
+      // used to tell.
+      product.currency,
+      product.reviewCount,
+      decimalToNumber(product.rating),
+      product.inStock,
+      match?.lastRank ?? null,
+      product.url,
+      product.externalId,
+      product.firstSeenAt.toISOString(),
+      product.lastScrapedAt.toISOString(),
+    ]);
   }
 
   async findOne(id: string): Promise<ProductDto> {

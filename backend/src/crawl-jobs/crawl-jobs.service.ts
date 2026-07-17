@@ -34,6 +34,22 @@ type RunWithJob = CrawlRun & {
   keyword?: { text: string } | null;
 };
 
+/**
+ * Every read of a job needs its keyword selection — the UI must say what a job
+ * collects, and "0 keywords" vs "all keywords" is exactly the ambiguity
+ * trackAllKeywords exists to remove. Shared so one query can't forget it and
+ * silently report an empty selection.
+ */
+const JOB_INCLUDE = {
+  keywords: {
+    include: { keyword: { select: { id: true, text: true, enabled: true } } },
+  },
+} as const;
+
+type JobWithKeywords = CrawlJob & {
+  keywords?: Array<{ keyword: { id: string; text: string; enabled: boolean } }>;
+};
+
 @Injectable()
 export class CrawlJobsService {
   constructor(
@@ -54,7 +70,6 @@ export class CrawlJobsService {
         name: dto.name,
         marketplace: dto.marketplace,
         type: dto.type,
-        query: dto.query ?? null,
         urls: dto.urls
           ? (dto.urls as unknown as Prisma.InputJsonValue)
           : Prisma.DbNull,
@@ -62,7 +77,15 @@ export class CrawlJobsService {
         maxItems: dto.maxItems,
         cronExpression: dto.cronExpression ?? null,
         enabled: dto.enabled,
+        trackAllKeywords: dto.trackAllKeywords,
+        // Stored even when trackAllKeywords is true: the selection is then unused,
+        // not discarded, so toggling the flag off later restores the picks rather
+        // than silently emptying them.
+        ...(dto.keywordIds?.length && {
+          keywords: { create: dto.keywordIds.map((keywordId) => ({ keywordId })) },
+        }),
       },
+      include: JOB_INCLUDE,
     });
 
     await this.scheduler.reconcileJob(job.id);
@@ -73,8 +96,9 @@ export class CrawlJobsService {
     const jobs = await this.prisma.crawlJob.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
+        ...JOB_INCLUDE,
         runs: {
-          orderBy: { createdAt: 'desc' },
+          orderBy: { createdAt: "desc" },
           take: 1,
           include: { job: { select: { name: true, marketplace: true } } },
         },
@@ -87,8 +111,9 @@ export class CrawlJobsService {
     const job = await this.prisma.crawlJob.findUnique({
       where: { id },
       include: {
+        ...JOB_INCLUDE,
         runs: {
-          orderBy: { createdAt: 'desc' },
+          orderBy: { createdAt: "desc" },
           take: 1,
           include: { job: { select: { name: true, marketplace: true } } },
         },
@@ -106,7 +131,6 @@ export class CrawlJobsService {
       where: { id },
       data: {
         ...(dto.name !== undefined && { name: dto.name }),
-        ...(dto.query !== undefined && { query: dto.query }),
         ...(dto.urls !== undefined && {
           urls: dto.urls as unknown as Prisma.InputJsonValue,
         }),
@@ -116,7 +140,25 @@ export class CrawlJobsService {
           cronExpression: dto.cronExpression,
         }),
         ...(dto.enabled !== undefined && { enabled: dto.enabled }),
+        ...(dto.trackAllKeywords !== undefined && {
+          trackAllKeywords: dto.trackAllKeywords,
+        }),
+        /**
+         * Replace the selection wholesale, in one transaction with the rest.
+         *
+         * deleteMany + create rather than a diff: the client sends the full list it
+         * wants, so computing an add/remove delta here would be work whose only
+         * product is a chance to get it wrong. Undefined means "don't touch" —
+         * distinct from an empty array, which means "select nothing".
+         */
+        ...(dto.keywordIds !== undefined && {
+          keywords: {
+            deleteMany: {},
+            create: dto.keywordIds.map((keywordId) => ({ keywordId })),
+          },
+        }),
       },
+      include: JOB_INCLUDE,
     });
 
     // The cron registration is derived state; rebuild it whenever the source changes.
@@ -226,14 +268,17 @@ export class CrawlJobsService {
     }
   }
 
-  private toJobDto(job: CrawlJob, lastRun: RunWithJob | null): CrawlJobDto {
+  private toJobDto(job: JobWithKeywords, lastRun: RunWithJob | null): CrawlJobDto {
     return {
       id: job.id,
       name: job.name,
       marketplace: job.marketplace,
       type: job.type,
-      query: job.query,
       urls: Array.isArray(job.urls) ? (job.urls as string[]) : null,
+      trackAllKeywords: job.trackAllKeywords,
+      // Empty when trackAllKeywords is true — that's the flag doing its job, not a
+      // missing include. Callers must read the flag before the array.
+      keywords: (job.keywords ?? []).map((k) => k.keyword),
       maxPages: job.maxPages,
       maxItems: job.maxItems,
       cronExpression: job.cronExpression,

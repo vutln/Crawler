@@ -1,16 +1,23 @@
-import { request } from './http';
+import { request, requestBlob } from './http';
 import type {
+  BulkCreateKeywordsResult,
   CrawlJob,
   CrawlRun,
   CrawlRunListQuery,
   CreateCrawlJobInput,
+  CreateKeywordInput,
+  Keyword,
   PaginatedCrawlRuns,
   PaginatedProducts,
   PricePoint,
   PriceHistoryInterval,
   Product,
+  ProductExportQuery,
   ProductListQuery,
+  RunKeywordResult,
   StatsOverview,
+  UpdateCrawlJobInput,
+  UpdateKeywordInput,
 } from '@/types/api';
 
 // `signal` threaded throughout so TanStack Query can cancel in-flight requests.
@@ -21,17 +28,51 @@ export const listProducts = (query: ProductListQuery, signal?: AbortSignal) =>
 export const getProduct = (id: string, signal?: AbortSignal) =>
   request<Product>(`/products/${id}`, { signal });
 
+/**
+ * The CURRENT FILTER as CSV — not the current page.
+ *
+ * ProductExportQuery has no page/pageSize (the backend omits them), so the type
+ * makes "export what I filtered" the only expressible call. Exporting the page the
+ * user happens to be sitting on is the usual way this feature ships broken.
+ */
+export const exportProductsCsv = (query: ProductExportQuery) =>
+  requestBlob('/products/export.csv', { query });
+
 export const getPriceHistory = (
   id: string,
   query: { from?: string; to?: string; interval?: PriceHistoryInterval },
   signal?: AbortSignal,
 ) => request<PricePoint[]>(`/products/${id}/price-history`, { query, signal });
 
+export const listKeywords = (signal?: AbortSignal) =>
+  request<Keyword[]>('/keywords', { signal });
+
+export const createKeyword = (body: CreateKeywordInput) =>
+  request<Keyword>('/keywords', { method: 'POST', body });
+
+/** Paste a list. Existing terms are skipped, not rejected — see the result shape. */
+export const bulkCreateKeywords = (keywords: string[]) =>
+  request<BulkCreateKeywordsResult>('/keywords/bulk', { method: 'POST', body: { keywords } });
+
+export const updateKeyword = (id: string, body: UpdateKeywordInput) =>
+  request<Keyword>(`/keywords/${id}`, { method: 'PATCH', body });
+
+export const deleteKeyword = (id: string) =>
+  request<void>(`/keywords/${id}`, { method: 'DELETE' });
+
+/** Collect this one keyword now, across every enabled sweep. Replaced SEARCH jobs. */
+export const runKeyword = (id: string) =>
+  request<RunKeywordResult>(`/keywords/${id}/run`, { method: 'POST' });
+
 export const listCrawlJobs = (signal?: AbortSignal) =>
   request<CrawlJob[]>('/crawl-jobs', { signal });
 
 export const createCrawlJob = (body: CreateCrawlJobInput) =>
   request<CrawlJob>('/crawl-jobs', { method: 'POST', body });
+
+/** PATCH has existed on the API since the start; nothing called it until jobs became editable. */
+export const updateCrawlJob = (id: string, body: UpdateCrawlJobInput) =>
+  request<CrawlJob>(`/crawl-jobs/${id}`, { method: 'PATCH', body });
 
 export const deleteCrawlJob = (id: string) =>
   request<void>(`/crawl-jobs/${id}`, { method: 'DELETE' });

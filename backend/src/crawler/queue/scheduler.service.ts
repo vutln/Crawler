@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
 import { randomUUID } from 'node:crypto';
-import { CrawlJobType, RunStatus, RunTrigger } from '../../generated/prisma/client';
+import { CrawlJobType, RunStatus, RunTrigger, type CrawlJob } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CRAWL_QUEUE, type ICrawlQueue } from './crawl-queue.interface';
 
@@ -122,7 +122,7 @@ export class SchedulerService implements OnModuleInit {
 
       const runIds =
         job.type === CrawlJobType.KEYWORD_SWEEP
-          ? await this.fanOut(jobId, label)
+          ? await this.fanOut(job, label)
           : [await this.createSingleRun(jobId)];
 
       for (const runId of runIds) {
@@ -134,7 +134,7 @@ export class SchedulerService implements OnModuleInit {
   }
 
   /**
-   * One QUEUED run per enabled keyword, all sharing a batchId.
+   * One QUEUED run per keyword this job tracks, all sharing a batchId.
    *
    * This is where "a list of keywords, daily, on three sites" actually happens:
    * the cron fires once per marketplace and expands against the keyword table, so
@@ -144,24 +144,41 @@ export class SchedulerService implements OnModuleInit {
    * createMany, but one insert for 20 keywords beats 20 round-trips, and the
    * batchId gives us a precise handle to read back.
    */
-  private async fanOut(jobId: string, label: string): Promise<string[]> {
+  private async fanOut(job: CrawlJob, label: string): Promise<string[]> {
+    /**
+     * `enabled` is an AND in BOTH modes, not just the track-all one.
+     *
+     * Keyword.enabled is the global master switch — "stop collecting this term
+     * anywhere". A job explicitly selecting a keyword must not override that, or
+     * disabling would appear to work while a job quietly kept crawling it.
+     */
     const keywords = await this.prisma.keyword.findMany({
-      where: { enabled: true },
+      where: {
+        enabled: true,
+        // trackAllKeywords is the whole point of the flag: it means "everything,
+        // including keywords added after this job was configured".
+        ...(job.trackAllKeywords ? {} : { jobs: { some: { jobId: job.id } } }),
+      },
       orderBy: { createdAt: 'asc' },
       select: { id: true },
     });
 
     if (keywords.length === 0) {
-      // Not an error: an empty keyword list is a configuration state, and a sweep
-      // with nothing to sweep should say so rather than look broken.
-      this.logger.warn(`"${label}" fired but no keywords are enabled — nothing to collect`);
+      // Not an error: an empty selection is a configuration state, and a sweep with
+      // nothing to sweep should say so rather than look broken. The two causes need
+      // different fixes, so name which one it is.
+      this.logger.warn(
+        job.trackAllKeywords
+          ? `"${label}" fired but no keywords are enabled — nothing to collect`
+          : `"${label}" fired but none of its selected keywords are enabled — nothing to collect`,
+      );
       return [];
     }
 
     const batchId = randomUUID();
     await this.prisma.crawlRun.createMany({
       data: keywords.map((k) => ({
-        jobId,
+        jobId: job.id,
         keywordId: k.id,
         batchId,
         status: RunStatus.QUEUED,

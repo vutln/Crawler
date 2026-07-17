@@ -21,12 +21,20 @@ describe('SchedulerService — KEYWORD_SWEEP fan-out', () => {
 
   function make(opts: {
     jobType: CrawlJobType;
-    keywords?: Array<{ id: string; enabled: boolean }>;
+    /** `tracked` marks membership of the job's explicit selection. */
+    keywords?: Array<{ id: string; enabled: boolean; tracked?: boolean }>;
     outstanding?: number;
+    trackAllKeywords?: boolean;
   }) {
     const created: Created[] = [];
     const enqueued: string[] = [];
-    const enabled = (opts.keywords ?? []).filter((k) => k.enabled);
+    const trackAll = opts.trackAllKeywords ?? true;
+
+    // Mirrors the real WHERE: enabled is an AND in BOTH modes, and the job's
+    // selection narrows it only when trackAllKeywords is false.
+    const selected = (opts.keywords ?? []).filter(
+      (k) => k.enabled && (trackAll || k.tracked === true),
+    );
 
     const prisma = {
       crawlRun: {
@@ -43,9 +51,14 @@ describe('SchedulerService — KEYWORD_SWEEP fan-out', () => {
       },
       crawlJob: {
         findUnique: () =>
-          Promise.resolve({ id: 'job_1', type: opts.jobType, marketplace: Marketplace.AMAZON }),
+          Promise.resolve({
+            id: 'job_1',
+            type: opts.jobType,
+            marketplace: Marketplace.AMAZON,
+            trackAllKeywords: trackAll,
+          }),
       },
-      keyword: { findMany: () => Promise.resolve(enabled.map((k) => ({ id: k.id }))) },
+      keyword: { findMany: () => Promise.resolve(selected.map((k) => ({ id: k.id }))) },
     } as unknown as PrismaService;
 
     const registry = {} as SchedulerRegistry;
@@ -104,6 +117,74 @@ describe('SchedulerService — KEYWORD_SWEEP fan-out', () => {
     expect(new Set(created.map((r) => r.batchId)).size).toBe(2);
   });
 
+  describe('per-job keyword selection', () => {
+    /**
+     * The default, and why the flag is explicit rather than inferred from an empty
+     * join table: "collect everything, including keywords added later" is a real
+     * intention that an empty selection cannot express.
+     */
+    it('collects every enabled keyword when trackAllKeywords is true', async () => {
+      const { trigger, created } = make({
+        jobType: CrawlJobType.KEYWORD_SWEEP,
+        trackAllKeywords: true,
+        keywords: [
+          { id: 'k1', enabled: true },
+          // Not in the job's selection, and irrelevant — track-all ignores it.
+          { id: 'k2', enabled: true, tracked: false },
+        ],
+      });
+
+      await trigger('job_1', 'Amazon sweep');
+      expect(created.map((r) => r.keywordId)).toEqual(['k1', 'k2']);
+    });
+
+    it('collects only the selected keywords when trackAllKeywords is false', async () => {
+      const { trigger, created } = make({
+        jobType: CrawlJobType.KEYWORD_SWEEP,
+        trackAllKeywords: false,
+        keywords: [
+          { id: 'k1', enabled: true, tracked: true },
+          { id: 'k2', enabled: true, tracked: false },
+          { id: 'k3', enabled: true, tracked: true },
+        ],
+      });
+
+      await trigger('job_1', 'Amazon sweep');
+      expect(created.map((r) => r.keywordId)).toEqual(['k1', 'k3']);
+    });
+
+    /**
+     * Keyword.enabled is the GLOBAL master switch — "stop collecting this term
+     * anywhere". A job selecting it explicitly must not override that, or disabling
+     * a keyword would appear to work while a job quietly kept crawling it.
+     */
+    it('still skips a disabled keyword the job explicitly selected', async () => {
+      const { trigger, created } = make({
+        jobType: CrawlJobType.KEYWORD_SWEEP,
+        trackAllKeywords: false,
+        keywords: [
+          { id: 'k1', enabled: false, tracked: true },
+          { id: 'k2', enabled: true, tracked: true },
+        ],
+      });
+
+      await trigger('job_1', 'Amazon sweep');
+      expect(created.map((r) => r.keywordId)).toEqual(['k2']);
+    });
+
+    it('does nothing when the job selects nothing', async () => {
+      const { trigger, created, enqueued } = make({
+        jobType: CrawlJobType.KEYWORD_SWEEP,
+        trackAllKeywords: false,
+        keywords: [{ id: 'k1', enabled: true, tracked: false }],
+      });
+
+      await trigger('job_1', 'Amazon sweep');
+      expect(created).toHaveLength(0);
+      expect(enqueued).toHaveLength(0);
+    });
+  });
+
   /** An empty keyword list is a config state, not a crash. */
   it('does nothing when no keywords are enabled', async () => {
     const { trigger, created, enqueued } = make({
@@ -135,14 +216,18 @@ describe('SchedulerService — KEYWORD_SWEEP fan-out', () => {
     expect(enqueued).toHaveLength(0);
   });
 
-  /** Legacy jobs must keep working untouched — one run, no keyword, no batch. */
-  it('creates a single keyword-less run for a plain SEARCH job', async () => {
+  /**
+   * A PRODUCT_URLS job re-checks a fixed list of URLs and has no search term at
+   * all, so it must NOT fan out — one run, no keyword, no batch. It is the only
+   * non-sweep type left (SEARCH was removed once Keyword replaced per-job queries).
+   */
+  it('creates a single keyword-less run for a PRODUCT_URLS job', async () => {
     const { trigger, created, enqueued } = make({
-      jobType: CrawlJobType.SEARCH,
+      jobType: CrawlJobType.PRODUCT_URLS,
       keywords: [{ id: 'k1', enabled: true }],
     });
 
-    await trigger('job_1', 'Legacy search');
+    await trigger('job_1', 'URL recheck');
 
     expect(created).toHaveLength(1);
     expect(created[0].keywordId).toBeUndefined();

@@ -43,8 +43,19 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
-/** Throws ApiError on non-2xx so TanStack Query's error path works. */
-export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+/**
+ * Everything up to the response body: URL building, the fetch, and the non-2xx
+ * ApiError. Shared by request() and requestBlob().
+ *
+ * Split out rather than making request<T> polymorphic over response type — that
+ * road ends with request<Blob>() silently returning parsed JSON. Two named
+ * functions, one shared shell.
+ *
+ * The error path stays here and stays JSON: Nest's exception filter returns JSON
+ * even from the CSV endpoint, so a failed download still produces a real message
+ * instead of a Blob containing an error page.
+ */
+async function rawRequest(path: string, options: RequestOptions = {}): Promise<Response> {
   const { method = 'GET', query, body, signal } = options;
 
   const res = await fetch(`${env.apiBaseUrl}/api${path}${buildQuery(query)}`, {
@@ -64,6 +75,36 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     throw new ApiError(res.status, messageFrom(res.status, parsed), parsed);
   }
 
+  return res;
+}
+
+/** Throws ApiError on non-2xx so TanStack Query's error path works. */
+export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const res = await rawRequest(path, options);
+
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
+}
+
+/**
+ * A binary/text download rather than JSON. Same errors, same query building.
+ *
+ * Returns the server's filename when it can: the browser hides Content-Disposition
+ * from JS cross-origin unless the server sends Access-Control-Expose-Headers (ours
+ * does). Dev is same-origin through the Vite proxy, so a missing expose header
+ * would ONLY show up in production — hence the caller-side fallback filename.
+ */
+export async function requestBlob(
+  path: string,
+  options: RequestOptions = {},
+): Promise<{ blob: Blob; filename?: string }> {
+  const res = await rawRequest(path, options);
+  const filename = filenameFrom(res.headers.get('Content-Disposition'));
+  return { blob: await res.blob(), filename };
+}
+
+/** `attachment; filename="products-2026-07-17.csv"` -> `products-2026-07-17.csv` */
+function filenameFrom(header: string | null): string | undefined {
+  if (!header) return undefined;
+  return /filename="?([^"';]+)"?/.exec(header)?.[1]?.trim();
 }

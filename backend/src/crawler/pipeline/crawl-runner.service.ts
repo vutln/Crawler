@@ -119,12 +119,14 @@ export class CrawlRunnerService {
 
     const ctx: CrawlContext = {
       /**
-       * A sweep run carries its own keyword; everything else falls back to the
-       * job's single query. That fallback is what keeps legacy SEARCH jobs working
-       * unchanged, and it is the only line that knows a sweep exists — the adapters
-       * still just receive a query.
+       * The run's keyword is the only source of a search term now — CrawlJob has no
+       * `query` column. PRODUCT_URLS runs carry no keyword and need none; they read
+       * ctx.urls instead.
+       *
+       * Note the adapters still just receive a query string and know nothing about
+       * keywords or sweeps. This line is the whole seam.
        */
-      query: keyword?.text ?? job.query ?? undefined,
+      query: keyword?.text,
       urls: Array.isArray(job.urls) ? (job.urls as string[]) : undefined,
       maxPages: job.maxPages,
       /**

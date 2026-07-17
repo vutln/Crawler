@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import type { Keyword } from '../generated/prisma/client';
+import type { ICrawlQueue } from '../crawler/queue/crawl-queue.interface';
 import type { PrismaService } from '../prisma/prisma.service';
 import { KeywordsService } from './keywords.service';
 
@@ -83,7 +84,8 @@ describe('KeywordsService', () => {
       },
     } as unknown as PrismaService;
 
-    return { service: new KeywordsService(prisma), rows };
+    const queue = { enqueue: () => Promise.resolve() } as unknown as ICrawlQueue;
+    return { service: new KeywordsService(prisma, queue), rows };
   }
 
   describe('normalizeText — the identity of a keyword', () => {

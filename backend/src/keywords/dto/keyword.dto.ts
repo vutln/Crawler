@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
+import { Marketplace } from '../../generated/prisma/client';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -95,6 +96,21 @@ export class UpdateKeywordDto {
   @IsString()
   @IsOptional()
   notes?: string | null;
+}
+
+/** What an ad-hoc "run this keyword now" actually queued. */
+export class RunKeywordResultDto {
+  @ApiProperty({ description: 'Groups the runs this trigger produced.' })
+  batchId!: string;
+  @ApiProperty({ type: [String], enum: Marketplace, enumName: 'Marketplace' })
+  marketplaces!: Marketplace[];
+  @ApiProperty({ description: 'One run per marketplace that had capacity.' })
+  queued!: number;
+  @ApiProperty({
+    type: [String],
+    description: 'Marketplaces skipped because that sweep already had work outstanding.',
+  })
+  skipped!: string[];
 }
 
 /** What a paste actually did. `skipped` is expected, not an error — see BulkCreateKeywordsDto. */

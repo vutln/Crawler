@@ -1,7 +1,10 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { getPriceHistory, getProduct, listProducts } from '@/api/endpoints';
+import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { exportProductsCsv, getPriceHistory, getProduct, listProducts } from '@/api/endpoints';
+import { ApiError } from '@/api/http';
 import { queryKeys } from '@/api/queryKeys';
-import type { PriceHistoryInterval, ProductListQuery } from '@/types/api';
+import { downloadBlob } from '@/lib/download';
+import type { PriceHistoryInterval, ProductExportQuery, ProductListQuery } from '@/types/api';
 
 export function useProducts(query: ProductListQuery) {
   return useQuery({
@@ -18,6 +21,31 @@ export function useProduct(id: string | undefined) {
     queryKey: queryKeys.products.detail(id ?? ''),
     queryFn: ({ signal }) => getProduct(id!, signal),
     enabled: Boolean(id),
+  });
+}
+
+/**
+ * Download the current filter as CSV.
+ *
+ * A mutation, not a query: it is user-triggered, must never be cached or refetched
+ * (a background refetch would re-download a file), and `isPending` gives the button
+ * its disabled state for free. It has no cache entry, so queryKeys needs no entry
+ * either — same shape as useCancelRun.
+ */
+export function useExportProductsCsv() {
+  return useMutation({
+    mutationFn: (query: ProductExportQuery) => exportProductsCsv(query),
+    onSuccess: ({ blob, filename }) => {
+      // Fallback matters in production: the browser hides Content-Disposition from
+      // JS cross-origin without Access-Control-Expose-Headers, and dev is
+      // same-origin via the Vite proxy, so its absence would only bite after deploy.
+      downloadBlob(blob, filename ?? `products-${new Date().toISOString().slice(0, 10)}.csv`);
+    },
+    onError: (error) => {
+      // The CSV endpoint still errors as JSON (Nest's exception filter), so this is
+      // a real message rather than a downloaded error page.
+      toast.error(error instanceof ApiError ? error.message : 'Export failed');
+    },
   });
 }
 

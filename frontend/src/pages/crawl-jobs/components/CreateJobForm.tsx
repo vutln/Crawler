@@ -1,110 +1,38 @@
 import { useState } from 'react';
-import { Button, Card, Field, Input, Select } from '@/components/ui';
-import {
-  DEFAULT_MARKETPLACE,
-  MARKETPLACE,
-  MARKETPLACE_OPTIONS,
-} from '@/domain/marketplace';
-import { useCreateCrawlJob } from '@/hooks/useCrawls';
-import type { Marketplace } from '@/types/api';
+import { Button, Modal } from '@/components/ui';
+import { JobForm } from './JobForm';
 
+/**
+ * The "+ New sweep" affordance. The form itself is JobForm, shared with editing so
+ * the two can't drift — a create form that offers different fields from the edit
+ * form is how a setting becomes unreachable after creation.
+ */
 export function CreateJobForm() {
-  const create = useCreateCrawlJob();
   const [open, setOpen] = useState(false);
-  const [name, setName] = useState('');
-  const [marketplace, setMarketplace] = useState<Marketplace>(DEFAULT_MARKETPLACE);
-  const [query, setQuery] = useState('');
-  const [cron, setCron] = useState('');
-  const [maxPages, setMaxPages] = useState('2');
-
-  const submit = () => {
-    create.mutate(
-      {
-        name: name.trim(),
-        marketplace,
-        type: 'SEARCH',
-        query: query.trim(),
-        maxPages: Number(maxPages) || 2,
-        maxItems: 100,
-        enabled: true,
-        ...(cron.trim() && { cronExpression: cron.trim() }),
-      },
-      {
-        onSuccess: () => {
-          setName('');
-          setQuery('');
-          setCron('');
-          setOpen(false);
-        },
-      },
-    );
-  };
-
-  if (!open) {
-    return (
-      <div>
-        <Button onClick={() => setOpen(true)} testId="new-job">
-          + New crawl job
-        </Button>
-      </div>
-    );
-  }
-
-  const note = MARKETPLACE[marketplace].note;
 
   return (
-    <Card className="p-3">
-      <div className="flex flex-wrap items-end gap-2">
-        <Field label="Name">
-          <Input
-            value={name}
-            onChange={setName}
-            placeholder="Keyboards on eBay"
-            className="w-48"
-            testId="job-name"
-          />
-        </Field>
+    <div>
+      <Button onClick={() => setOpen(true)} testId="new-job">
+        + New sweep
+      </Button>
 
-        <Field label="Site">
-          <Select<Marketplace>
-            value={marketplace}
-            onChange={(v) => v && setMarketplace(v)}
-            options={MARKETPLACE_OPTIONS}
-            testId="job-marketplace"
-          />
-        </Field>
-
-        <Field label="Search query">
-          <Input
-            value={query}
-            onChange={setQuery}
-            placeholder="mechanical keyboard"
-            className="w-48"
-            testId="job-query"
-          />
-        </Field>
-
-        <Field label="Max pages">
-          <Input type="number" value={maxPages} onChange={setMaxPages} className="w-20" />
-        </Field>
-
-        <Field label="Cron (optional)">
-          <Input value={cron} onChange={setCron} placeholder="0 0 6 * * *" className="w-32" />
-        </Field>
-
-        <Button
-          onClick={submit}
-          disabled={!name.trim() || !query.trim() || create.isPending}
-          testId="job-submit"
+      {/*
+        Mounted only while open. <dialog> keeps its children in the DOM either way,
+        so leaving it mounted would preserve half-typed state from a dismissed
+        dialog and silently reopen with it — and JobForm seeds its state from props
+        on first render only.
+      */}
+      {open && (
+        <Modal
+          open={open}
+          onClose={() => setOpen(false)}
+          title="New sweep"
+          description="A sweep collects keywords on one site. Manage the list in Keywords."
+          testId="job-modal"
         >
-          {create.isPending ? 'Creating…' : 'Create'}
-        </Button>
-        <Button variant="ghost" onClick={() => setOpen(false)}>
-          Cancel
-        </Button>
-      </div>
-
-      {note && <p className="mt-2 text-[11px] text-amber-700">{note}</p>}
-    </Card>
+          <JobForm onDone={() => setOpen(false)} />
+        </Modal>
+      )}
+    </div>
   );
 }

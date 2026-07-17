@@ -19,16 +19,35 @@ export class RobotsService {
   private readonly cache = new Map<string, CacheEntry>();
   private readonly ttlMs = 60 * 60 * 1000; // 1h — robots.txt is not volatile
   private readonly enabled: boolean;
-  private readonly userAgent: string;
+  private readonly headers: Record<string, string>;
 
   constructor(private readonly config: ConfigService) {
     this.enabled = this.config.get<boolean>('CRAWL_RESPECT_ROBOTS', true);
-    // Used for two things: the UA header when fetching robots.txt, and matching
-    // it against User-agent groups. Either value falls through to the `*` group
-    // (we match no named-bot group), so rule evaluation is identical whether or
-    // not CRAWL_USER_AGENT is set.
-    this.userAgent =
-      this.config.get<string>('CRAWL_USER_AGENT') || 'Mozilla/5.0 (compatible; EcomCollector/1.0)';
+
+    // The UA here serves two purposes: the header on the robots.txt fetch, and the
+    // token matched against User-agent groups. It has to resolve to whatever
+    // WebDriverFactory actually puts on the wire — see its create(). An empty
+    // CRAWL_USER_AGENT means Chrome sends its own HeadlessChrome/NNN, so the
+    // EcomCollector string this used to invent was a third identity that nothing
+    // else ever used: asking permission as one client and then crawling as another.
+    //
+    // That distinction is a no-op today — neither string matches a named group on
+    // Amazon, eBay or Etsy, so both fall through to `*` and evaluate identically.
+    // It stops being a no-op the day one of them writes a rule for headless
+    // browsers, which is precisely the case where the answer should change and the
+    // invented identity would have silently ignored it.
+    //
+    // No version: groups match on the product token, and Chrome's exact build isn't
+    // knowable until a driver exists.
+    const configured = this.config.get<string>('CRAWL_USER_AGENT');
+    this.headers = {
+      'User-Agent': configured || 'HeadlessChrome',
+      Accept: 'text/plain,*/*;q=0.8',
+    };
+  }
+
+  private get userAgent(): string {
+    return this.headers['User-Agent'];
   }
 
   async isAllowed(url: string): Promise<boolean> {
@@ -66,7 +85,7 @@ export class RobotsService {
     let robot: Robot | null = null;
     try {
       const res = await fetch(robotsUrl, {
-        headers: { 'User-Agent': this.userAgent },
+        headers: this.headers,
         signal: AbortSignal.timeout(10_000),
       });
       if (res.ok) {

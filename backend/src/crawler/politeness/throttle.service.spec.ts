@@ -149,10 +149,97 @@ describe('ThrottleService', () => {
     });
   });
 
-  it('clears everything on reset', () => {
+  describe('site-declared Crawl-delay', () => {
+    it('lengthens the wait when the site asks for more than our floor', async () => {
+      throttle.setHostFloor(AMAZON, 30_000);
+      await throttle.acquire(AMAZON); // stamps lastRequestAt
+
+      const owed = throttle.owedMsFor(AMAZON);
+      expect(owed).toBeGreaterThan(28_000);
+      expect(owed).toBeLessThanOrEqual(30_000);
+    });
+
+    /** Our floor is a promise we made. A site asking for less cannot bid it down. */
+    it('ignores a Crawl-delay looser than our own floor', async () => {
+      throttle.setHostFloor(AMAZON, 500);
+      await throttle.acquire(AMAZON);
+
+      const owed = throttle.owedMsFor(AMAZON);
+      expect(owed).toBeGreaterThan(1000);
+      expect(owed).toBeLessThanOrEqual(2000);
+    });
+
+    it('applies only to the host that declared it', async () => {
+      throttle.setHostFloor(AMAZON, 30_000);
+      await throttle.acquire(EBAY);
+
+      expect(throttle.owedMsFor(EBAY)).toBeLessThanOrEqual(2000);
+    });
+
+    it('stacks a wall on top of the declared floor rather than replacing it', async () => {
+      throttle.setHostFloor(AMAZON, 30_000);
+      await throttle.acquire(AMAZON);
+      throttle.recordBlock(AMAZON);
+
+      // 30s of declared pacing + 128s of cooldown, less the moment just elapsed.
+      const owed = throttle.owedMsFor(AMAZON);
+      expect(owed).toBeGreaterThan(155_000);
+      expect(owed).toBeLessThanOrEqual(158_000);
+    });
+  });
+
+  describe('owedBackoffMsFor — the cooldown, without the ordinary pacing', () => {
+    it('owes nothing on a host never touched', () => {
+      expect(throttle.owedBackoffMsFor(AMAZON)).toBe(0);
+    });
+
+    /**
+     * The whole reason this is split from owedMsFor.
+     *
+     * navigate() refuses to knock when it owes more than MAX_IDLE_HOLD_MS (15s),
+     * and reports that refusal as BLOCKED. Measured against total owed time, a site
+     * declaring `Crawl-delay: 30` would trip that on every single request — so
+     * honouring robots.txt would have made a cooperating site look like a wall and
+     * failed every crawl of it. Cooperation must not be charged as hostility.
+     */
+    it('does not read a long Crawl-delay as a cooldown', async () => {
+      throttle.setHostFloor(AMAZON, 30_000);
+      await throttle.acquire(AMAZON);
+
+      expect(throttle.owedMsFor(AMAZON)).toBeGreaterThan(28_000); // we do wait...
+      expect(throttle.owedBackoffMsFor(AMAZON)).toBe(0); // ...but nothing is wrong
+    });
+
+    it('reports the cooldown once the host has actually walled us', async () => {
+      await throttle.acquire(AMAZON);
+      throttle.recordBlock(AMAZON);
+
+      const owed = throttle.owedBackoffMsFor(AMAZON);
+      expect(owed).toBeGreaterThan(125_000);
+      expect(owed).toBeLessThanOrEqual(128_000);
+    });
+
+    it('decays with time served, like owedMsFor', async () => {
+      const quick = makeThrottle({ CRAWL_MIN_DELAY_MS: 20, CRAWL_MAX_BACKOFF_MS: 1000 });
+      await quick.acquire(AMAZON);
+      quick.recordBlock(AMAZON);
+
+      expect(quick.owedBackoffMsFor(AMAZON)).toBeGreaterThan(0);
+      await new Promise((r) => setTimeout(r, 1100));
+      expect(quick.owedBackoffMsFor(AMAZON)).toBe(0);
+    });
+  });
+
+  it('clears everything on reset', async () => {
     throttle.recordBlock(AMAZON);
+    throttle.setHostFloor(AMAZON, 30_000);
     throttle.reset();
+
     expect(throttle.backoffMsFor(AMAZON)).toBe(0);
+
+    // The declared floor went too, not just the backoff.
+    await throttle.acquire(AMAZON);
+    expect(throttle.owedMsFor(AMAZON)).toBeLessThanOrEqual(2000);
   });
 
   it('paces an unblocked host at the floor without stalling it', async () => {

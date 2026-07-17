@@ -79,13 +79,22 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
       throw new Error(`robots.txt disallows ${url} for our user-agent`);
     }
 
+    // Site-declared pacing outranks our own floor when it is stricter. Reads the
+    // same 1h robots cache isAllowed() just populated, so it costs no extra fetch.
+    const declaredDelay = await this.robots.crawlDelayMs(url);
+    if (declaredDelay !== null) this.throttle.setHostFloor(url, declaredDelay);
+
     // Say so and stop, rather than idle a browser through a cooldown.
     //
     // The cooldown is NOT skipped or shortened by this — the host stays owed and
     // the clock keeps running. This only decides how we spend the wait: a run
     // that reports "cooling down, 118s left" in two seconds is more useful than
     // one that shows RUNNING for two minutes behind a blank window.
-    const owed = this.throttle.owedMsFor(url);
+    //
+    // Backoff only, not total owed time: a Crawl-delay above MAX_IDLE_HOLD_MS is a
+    // polite site being honoured, and charging it here would report a block that
+    // never happened and refuse every crawl of that host.
+    const owed = this.throttle.owedBackoffMsFor(url);
     if (owed > MAX_IDLE_HOLD_MS) {
       throw new BlockedError(
         `${this.marketplace} is ${Math.round(owed / 1000)}s into a cooldown from an earlier ` +

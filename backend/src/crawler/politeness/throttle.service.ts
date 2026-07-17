@@ -20,6 +20,12 @@ export class ThrottleService {
   private readonly lastRequestAt = new Map<string, number>();
 
   /**
+   * hostname -> Crawl-delay the site declared in robots.txt, when it is stricter than
+   * our own floor. Only ever holds values above minDelayMs — see setHostFloor.
+   */
+  private readonly hostFloors = new Map<string, number>();
+
+  /**
    * hostname -> backoff step. Failures nudge it, walls jump it, successes walk it
    * back down one at a time. See recordSuccess for why the walk-down matters.
    */
@@ -63,6 +69,46 @@ export class ThrottleService {
   }
 
   /**
+   * Raise this host's pacing floor to a Crawl-delay the site declared in robots.txt.
+   * Idempotent — navigate() calls this on every page load.
+   *
+   * Only ever raises. A site asking for less than CRAWL_MIN_DELAY_MS is not permission
+   * to speed up: our floor is a promise we made, not a default the site can bid down.
+   */
+  setHostFloor(url: string, delayMs: number): void {
+    if (delayMs <= this.minDelayMs) return;
+
+    const host = safeHostname(url);
+    if (this.hostFloors.get(host) === delayMs) return;
+
+    this.hostFloors.set(host, delayMs);
+    this.logger.log(
+      `${host}: honouring robots.txt Crawl-delay of ${Math.round(delayMs / 1000)}s ` +
+        `(our own floor is ${Math.round(this.minDelayMs / 1000)}s)`,
+    );
+  }
+
+  /** This host's effective floor: ours, or the site's own if it asked for more. */
+  private floorFor(host: string): number {
+    return Math.max(this.minDelayMs, this.hostFloors.get(host) ?? 0);
+  }
+
+  /**
+   * The part of the wait that exists because this host *walled* us, as opposed to the
+   * part that is ordinary pacing. Time-aware, so it decays as the cooldown is served.
+   *
+   * Split from owedMsFor because a caller that refuses to idle a browser through a
+   * cooldown must not also refuse to honour a long Crawl-delay. A site asking for 30s
+   * between requests is cooperating, and folding that into the same number would read
+   * as a block and fail every crawl of a site polite enough to say so.
+   */
+  owedBackoffMsFor(url: string): number {
+    const host = safeHostname(url);
+    const last = this.lastRequestAt.get(host) ?? 0;
+    return Math.max(0, last + this.backoffFor(host) - Date.now());
+  }
+
+  /**
    * Milliseconds still owed before this host may be touched — the backoff minus
    * the time already served. 0 means go now.
    *
@@ -78,7 +124,7 @@ export class ThrottleService {
 
   private owedFor(host: string): number {
     const last = this.lastRequestAt.get(host) ?? 0;
-    const target = last + this.minDelayMs + this.backoffFor(host);
+    const target = last + this.floorFor(host) + this.backoffFor(host);
     return Math.max(0, target - Date.now());
   }
 
@@ -87,8 +133,10 @@ export class ThrottleService {
 
     // Cooling off after a wall runs to minutes, and the run sits RUNNING for all
     // of it. Announce anything beyond the ordinary floor — an unexplained silent
-    // pause is indistinguishable from a hang.
-    if (waitMs > this.minDelayMs * 2) {
+    // pause is indistinguishable from a hang. Measured against this host's floor
+    // rather than ours: where robots.txt asked for 30s, 30s *is* the ordinary pace,
+    // and saying so on every page would be noise. setHostFloor announces it once.
+    if (waitMs > this.floorFor(host) * 2) {
       this.logger.log(
         `${host}: holding ${Math.round(waitMs / 1000)}s before next request ` +
           `(backoff step ${this.steps.get(host) ?? 0})`,
@@ -152,6 +200,7 @@ export class ThrottleService {
     this.queues.clear();
     this.lastRequestAt.clear();
     this.steps.clear();
+    this.hostFloors.clear();
   }
 }
 

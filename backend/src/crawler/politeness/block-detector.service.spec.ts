@@ -136,6 +136,39 @@ describe('BlockDetectorService', () => {
       expect(signal.reason).toMatch(/error page/i);
     });
 
+    /**
+     * The `ambiguous` flag is what licenses navigate() to knock a second time, so
+     * its blast radius has to stay exactly one signature wide.
+     *
+     * The marketplace error page earns it because it genuinely cannot be told from
+     * a 5xx on one sample — the reason string has always said "soft block OR
+     * transient error". Everything else here is the site refusing us in words, and
+     * re-asking an answered question is a retry loop.
+     */
+    it('marks ONLY the marketplace error page ambiguous', () => {
+      expect(detector.inspect({ html: AMAZON_DOGS }).ambiguous).toBe(true);
+      expect(detector.inspect({ html: EBAY_ERROR_PAGE }).ambiguous).toBe(true);
+    });
+
+    it.each([
+      ['Amazon CAPTCHA', 'Enter the characters you see below'],
+      ['Amazon bot check', "Sorry, we just need to make sure you're not a robot"],
+      ['eBay interstitial', '<h1>Pardon Our Interruption</h1>'],
+      ['Cloudflare', '<div class="cf-browser-verification">'],
+      ['PerimeterX', '<div id="px-captcha"></div>'],
+      ['Etsy restriction', 'Access is temporarily restricted'],
+    ])('treats %s as an explicit refusal, never retryable', (_label, html) => {
+      const signal = detector.inspect({ html });
+      expect(signal.blocked).toBe(true);
+      expect(signal.ambiguous).toBe(false);
+    });
+
+    it('reports a clean page as neither blocked nor ambiguous', () => {
+      const signal = detector.inspect({ html: '<html><body>real results</body></html>' });
+      expect(signal.blocked).toBe(false);
+      expect(signal.ambiguous).toBeUndefined();
+    });
+
     it('matches eBay across the element boundary, not just the rendered text', () => {
       // The half that does the work: "SORRY" and the phrase are in sibling nodes,
       // so a \s*-bridged pattern would pass this page as healthy.

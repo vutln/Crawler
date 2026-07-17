@@ -4,14 +4,38 @@ export interface BlockSignal {
   blocked: boolean;
   reason?: string;
   evidence?: string;
+  /**
+   * True only when the page CANNOT be classified from a single sample — i.e. the
+   * marketplace's generic error page, which is served both for real 5xx blips and
+   * as a soft block.
+   *
+   * Callers may retry an ambiguous signal exactly once to disambiguate it (see
+   * SeleniumAdapterBase.navigate). Everything else is an EXPLICIT refusal — a
+   * CAPTCHA, a challenge, a named anti-bot vendor — where the site has told us no
+   * in words. Those must never be retried: re-asking a question that was already
+   * answered is what a retry loop is, and it is what deepens the throttle.
+   *
+   * Default false. A new signature is an explicit refusal unless proven otherwise.
+   */
+  ambiguous?: boolean;
 }
 
 @Injectable()
 export class BlockDetectorService {
   private readonly logger = new Logger(BlockDetectorService.name);
 
-  /** Matched against page HTML, case-insensitive. */
-  private readonly signatures: Array<{ pattern: RegExp; reason: string }> = [
+  /**
+   * Matched against page HTML, case-insensitive.
+   *
+   * `ambiguous` is opt-in and rare — see BlockSignal. Omit it unless the page
+   * genuinely cannot be told apart from a transient error, because it is the one
+   * flag that permits a caller to knock a second time.
+   */
+  private readonly signatures: Array<{
+    pattern: RegExp;
+    reason: string;
+    ambiguous?: boolean;
+  }> = [
     // Amazon
     {
       pattern: /images-na\.ssl-images-amazon\.com\/captcha/i,
@@ -79,10 +103,18 @@ export class BlockDetectorService {
     {
       pattern: /Sorry[!,.]?\s*Something went wrong/i,
       reason: 'Marketplace error page — soft block or transient error',
+      // The ONLY ambiguous signature. The reason string has always said "soft
+      // block OR transient error"; this flag is that sentence made actionable, so
+      // one retry can settle which it was instead of us guessing wall every time.
+      ambiguous: true,
     },
     {
       pattern: /Something went wrong on our end/i,
       reason: 'Marketplace error page — soft block or transient error',
+      // The ONLY ambiguous signature. The reason string has always said "soft
+      // block OR transient error"; this flag is that sentence made actionable, so
+      // one retry can settle which it was instead of us guessing wall every time.
+      ambiguous: true,
     },
 
     // Generic vendors
@@ -168,12 +200,17 @@ export class BlockDetectorService {
 
     // Title as well as body: the title is often the wall's clearest statement
     // about itself ("Access is temporarily restricted").
-    for (const { pattern, reason } of this.signatures) {
+    for (const { pattern, reason, ambiguous } of this.signatures) {
       for (const haystack of [title, html]) {
         if (!haystack) continue;
         const match = pattern.exec(haystack);
         if (match) {
-          return { blocked: true, reason, evidence: excerpt(match[0]) };
+          return {
+            blocked: true,
+            reason,
+            evidence: excerpt(match[0]),
+            ambiguous: ambiguous === true,
+          };
         }
       }
     }

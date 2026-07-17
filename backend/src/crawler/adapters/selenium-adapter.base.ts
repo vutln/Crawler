@@ -1,7 +1,7 @@
 import { Inject, Logger } from '@nestjs/common';
 import { By, until, type WebDriver, type WebElement } from 'selenium-webdriver';
 import type { Marketplace } from '../../generated/prisma/client';
-import { BlockDetectorService } from '../politeness/block-detector.service';
+import { BlockDetectorService, type BlockSignal } from '../politeness/block-detector.service';
 import { RobotsService } from '../politeness/robots.service';
 import { ThrottleService } from '../politeness/throttle.service';
 import { WebDriverFactory } from '../driver/webdriver.factory';
@@ -104,38 +104,85 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
     }
 
     await this.throttle.acquire(url, ctx.signal);
+    await this.load(driver, url);
 
+    let signal = await this.inspectPage(driver);
+
+    /**
+     * Exactly one retry, and ONLY for a signal the detector marks ambiguous.
+     *
+     * The marketplace error page ("Sorry! Something went wrong") is served both
+     * for genuine 5xx blips and as a soft block — the detector's own comment says
+     * it is "genuinely ambiguous", and one sample cannot tell them apart. We used
+     * to resolve that by always guessing "wall", paying 6 backoff steps (~2min)
+     * and failing the run on evidence that might be a hiccup. A second look costs
+     * one request and settles it.
+     *
+     * The boundary matters more than the retry. An EXPLICIT refusal — CAPTCHA,
+     * "not a robot", DataDome, Distil — is never retried: the site answered in
+     * words, and asking again is a retry loop, which is the thing that deepens
+     * the throttle and the thing this codebase refuses to do. We also do not
+     * change anything about ourselves between the two attempts: same driver, same
+     * cookies, same headers, same identity. This disambiguates a page; it does not
+     * try to get a different answer to the same question.
+     *
+     * Costed like any other request: it goes through throttle.acquire(), so the
+     * per-host floor is paid again before we knock.
+     */
+    if (signal.blocked && signal.ambiguous) {
+      if (ctx.signal.aborted) throw new Error('Aborted');
+
+      this.logger.warn(
+        `${url}: ${signal.reason} — ambiguous by nature, taking one more look ` +
+          `before calling it a wall`,
+      );
+
+      await this.throttle.acquire(url, ctx.signal);
+      await this.load(driver, url);
+      signal = await this.inspectPage(driver);
+
+      if (!signal.blocked) {
+        this.logger.log(`${url}: second look rendered normally — transient, not a wall`);
+      }
+    }
+
+    if (signal.blocked) {
+      this.blockDetector.logIfBlocked(signal, url);
+      // recordBlock, not recordFailure: a wall costs several backoff steps.
+      this.throttle.recordBlock(url);
+      throw new BlockedError(
+        `${this.marketplace} blocked the request: ${signal.reason}`,
+        signal.evidence,
+      );
+    }
+
+    this.throttle.recordSuccess(url);
+  }
+
+  /** driver.get with the throttle's failure bookkeeping. Caller must have acquired first. */
+  private async load(driver: WebDriver, url: string): Promise<void> {
     try {
       await driver.get(url);
     } catch (err) {
       this.throttle.recordFailure(url);
       throw err;
     }
-
-    await this.assertNotBlocked(driver, url);
-    this.throttle.recordSuccess(url);
   }
 
-  /** A blocked page returns HTTP 200 with a parseable DOM — the status tells you nothing. */
-  protected async assertNotBlocked(driver: WebDriver, context: string): Promise<void> {
+  /**
+   * Read the rendered page and classify it. Pure observation — no throwing, no
+   * throttle bookkeeping, so navigate() can call it twice and decide once.
+   *
+   * A blocked page returns HTTP 200 with a perfectly parseable DOM; the status
+   * code tells you nothing. The body is the only evidence there is.
+   */
+  private async inspectPage(driver: WebDriver): Promise<BlockSignal> {
     const [html, title, currentUrl] = await Promise.all([
       driver.getPageSource().catch(() => ''),
       driver.getTitle().catch(() => ''),
       driver.getCurrentUrl().catch(() => ''),
     ]);
-
-    const signal = this.blockDetector.inspect({ html, title, url: currentUrl });
-    if (signal.blocked) {
-      this.blockDetector.logIfBlocked(signal, context);
-      // recordBlock, not recordFailure: a wall costs several backoff steps. Keyed
-      // off the URL we navigated to — `context` here is that URL, and safeHostname
-      // needs a real one.
-      this.throttle.recordBlock(context);
-      throw new BlockedError(
-        `${this.marketplace} blocked the request: ${signal.reason}`,
-        signal.evidence,
-      );
-    }
+    return this.blockDetector.inspect({ html, title, url: currentUrl });
   }
 
   /** Wait for a container proving the page rendered. Absence is a valid outcome. */

@@ -124,7 +124,16 @@ export function useTriggerCrawl() {
       toast.error(error instanceof ApiError ? error.message : 'Failed to start crawl');
     },
 
-    onSuccess: (run) => toast.success(`Crawl queued for ${run.jobName}`),
+    // Say how many, because a sweep queues one run per keyword and "Crawl queued"
+    // would understate a 20-run fan-out.
+    onSuccess: (runs) => {
+      const first = runs[0];
+      toast.success(
+        runs.length === 1
+          ? `Crawl queued for ${first.jobName}`
+          : `${runs.length} crawls queued for ${first.jobName} — one per keyword`,
+      );
+    },
 
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.crawlRuns.all });

@@ -70,11 +70,14 @@ export class CrawlJobsController {
 
   @Post(':id/run')
   @ApiOperation({
-    summary: 'Trigger a run now',
-    description: 'Returns immediately with a QUEUED run; poll GET /crawl-runs/:id for progress.',
+    summary: 'Trigger this job now',
+    description:
+      'Returns immediately with the QUEUED runs; poll GET /crawl-runs for progress. ' +
+      'A sweep produces ONE RUN PER KEYWORD it tracks, which is why this is an array — ' +
+      'a single-run response could only ever describe part of what was queued.',
   })
-  @ApiCreatedResponse({ type: CrawlRunDto })
-  trigger(@Param('id') id: string): Promise<CrawlRunDto> {
+  @ApiCreatedResponse({ type: [CrawlRunDto] })
+  trigger(@Param('id') id: string): Promise<CrawlRunDto[]> {
     return this.jobs.trigger(id);
   }
 }

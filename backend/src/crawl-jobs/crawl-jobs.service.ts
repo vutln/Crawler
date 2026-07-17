@@ -172,8 +172,18 @@ export class CrawlJobsService {
     await this.scheduler.reconcileJob(id); // removes the cron registration
   }
 
-  /** Queue a run now. Returns immediately — the dashboard polls for progress. */
-  async trigger(id: string): Promise<CrawlRunDto> {
+  /**
+   * Queue this job's runs now. Returns immediately — the dashboard polls for progress.
+   *
+   * Returns an ARRAY because a sweep is N runs, one per keyword it tracks. This
+   * used to create a single run itself, which meant a manually-triggered sweep
+   * produced one run with no keywordId — and every adapter threw "search requires a
+   * query". Only the cron knew how to fan out.
+   *
+   * So it delegates to SchedulerService.queueRunsFor: one implementation of
+   * "job -> runs", used by both trigger paths. The duplicate was the bug.
+   */
+  async trigger(id: string): Promise<CrawlRunDto[]> {
     const job = await this.prisma.crawlJob.findUnique({ where: { id } });
     if (!job) throw new NotFoundException(`Crawl job ${id} not found`);
 
@@ -189,13 +199,25 @@ export class CrawlJobsService {
       );
     }
 
-    const run = await this.prisma.crawlRun.create({
-      data: { jobId: id, status: RunStatus.QUEUED, trigger: RunTrigger.MANUAL },
-      include: { job: { select: { name: true, marketplace: true } } },
-    });
+    const runIds = await this.scheduler.queueRunsFor(job, RunTrigger.MANUAL);
+    if (runIds.length === 0) {
+      // A sweep that tracks no keywords queues nothing. Saying "started" would be a
+      // lie the user only uncovers by watching a runs list that never changes.
+      throw new BadRequestException(
+        'This sweep tracks no keywords, so there is nothing to collect. ' +
+          'Add keywords, or set it to track all keywords.',
+      );
+    }
 
-    await this.queue.enqueue(run.id);
-    return this.toRunDto(run);
+    const runs = await this.prisma.crawlRun.findMany({
+      where: { id: { in: runIds } },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        job: { select: { name: true, marketplace: true } },
+        keyword: { select: { text: true } },
+      },
+    });
+    return runs.map((r) => this.toRunDto(r));
   }
 
   async listRuns(query: ListCrawlRunsDto): Promise<PaginatedCrawlRunsDto> {

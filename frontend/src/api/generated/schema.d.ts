@@ -190,8 +190,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Trigger a run now
-         * @description Returns immediately with a QUEUED run; poll GET /crawl-runs/:id for progress.
+         * Trigger this job now
+         * @description Returns immediately with the QUEUED runs; poll GET /crawl-runs for progress. A sweep produces ONE RUN PER KEYWORD it tracks, which is why this is an array — a single-run response could only ever describe part of what was queued.
          */
         post: operations["CrawlJobsController_trigger"];
         delete?: never;
@@ -375,8 +375,6 @@ export interface components {
         KeywordRefDto: {
             id: string;
             text: string;
-            /** @description A disabled keyword is skipped even if this job selects it. */
-            enabled: boolean;
         };
         /** @enum {string} */
         RunStatus: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "BLOCKED";
@@ -420,7 +418,7 @@ export interface components {
             marketplace: components["schemas"]["Marketplace"];
             type: components["schemas"]["CrawlJobType"];
             urls: string[] | null;
-            /** @description true = every enabled keyword, including future ones */
+            /** @description true = every keyword, including ones added later */
             trackAllKeywords: boolean;
             /**
              * @description The job's explicit selection. EMPTY when trackAllKeywords is true — read the
@@ -442,7 +440,7 @@ export interface components {
             marketplace: components["schemas"]["Marketplace"];
             type: components["schemas"]["CrawlJobType"];
             /**
-             * @description true = collect every enabled keyword, including ones added later. false = collect only `keywordIds`.
+             * @description true = collect every keyword, including ones added later. false = collect only `keywordIds`.
              * @default true
              */
             trackAllKeywords: boolean;
@@ -901,7 +899,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CrawlRunDto"];
+                    "application/json": components["schemas"]["CrawlRunDto"][];
                 };
             };
         };

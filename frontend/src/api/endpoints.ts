@@ -72,8 +72,16 @@ export const updateCrawlJob = (id: string, body: UpdateCrawlJobInput) =>
 export const deleteCrawlJob = (id: string) =>
   request<void>(`/crawl-jobs/${id}`, { method: 'DELETE' });
 
+/**
+ * Returns an ARRAY: a sweep queues one run per keyword it tracks.
+ *
+ * Note the response type here is hand-written, not derived from the generated
+ * schema — `request<T>` takes it on trust. So when the API changed from one run to
+ * many, nothing failed to compile; it would just have handed an array to code
+ * expecting an object. Keep this in sync by hand.
+ */
 export const triggerCrawl = (jobId: string) =>
-  request<CrawlRun>(`/crawl-jobs/${jobId}/run`, { method: 'POST' });
+  request<CrawlRun[]>(`/crawl-jobs/${jobId}/run`, { method: 'POST' });
 
 export const listCrawlRuns = (query: CrawlRunListQuery, signal?: AbortSignal) =>
   request<PaginatedCrawlRuns>('/crawl-runs', { query, signal });

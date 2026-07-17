@@ -120,17 +120,33 @@ export class SchedulerService implements OnModuleInit {
         return;
       }
 
-      const runIds =
-        job.type === CrawlJobType.KEYWORD_SWEEP
-          ? await this.fanOut(job, label)
-          : [await this.createSingleRun(jobId)];
-
-      for (const runId of runIds) {
-        await this.queue.enqueue(runId);
-      }
+      await this.queueRunsFor(job, RunTrigger.SCHEDULED);
     } catch (err) {
       this.logger.error(`Failed to trigger "${label}": ${(err as Error).message}`);
     }
+  }
+
+  /**
+   * Turn a job into runs and queue them. Returns the created run ids.
+   *
+   * PUBLIC because both trigger paths must go through it: the cron above, and the
+   * manual "Run now" in CrawlJobsService. When only the cron knew how to fan out,
+   * clicking Run now on a sweep created ONE keyword-less run and every adapter
+   * threw "search requires a query" — the button was broken for every sweep job.
+   *
+   * So this is the single place that knows a sweep becomes N runs. A second
+   * implementation is what caused the bug; there must not be one.
+   */
+  async queueRunsFor(job: CrawlJob, trigger: RunTrigger): Promise<string[]> {
+    const runIds =
+      job.type === CrawlJobType.KEYWORD_SWEEP
+        ? await this.fanOut(job, trigger)
+        : [await this.createSingleRun(job.id, trigger)];
+
+    for (const runId of runIds) {
+      await this.queue.enqueue(runId);
+    }
+    return runIds;
   }
 
   /**
@@ -144,7 +160,7 @@ export class SchedulerService implements OnModuleInit {
    * createMany, but one insert for 20 keywords beats 20 round-trips, and the
    * batchId gives us a precise handle to read back.
    */
-  private async fanOut(job: CrawlJob, label: string): Promise<string[]> {
+  private async fanOut(job: CrawlJob, trigger: RunTrigger): Promise<string[]> {
     /**
      * The job's selection is the ONLY thing that decides what it collects.
      *
@@ -169,8 +185,8 @@ export class SchedulerService implements OnModuleInit {
       // different fixes, so name which one it is.
       this.logger.warn(
         job.trackAllKeywords
-          ? `"${label}" fired but there are no keywords at all — nothing to collect`
-          : `"${label}" fired but no keywords are selected for it — nothing to collect`,
+          ? `"${job.name}" fired but there are no keywords at all — nothing to collect`
+          : `"${job.name}" fired but no keywords are selected for it — nothing to collect`,
       );
       return [];
     }
@@ -182,7 +198,9 @@ export class SchedulerService implements OnModuleInit {
         keywordId: k.id,
         batchId,
         status: RunStatus.QUEUED,
-        trigger: RunTrigger.SCHEDULED,
+        // MANUAL when a human clicked Run now, SCHEDULED when the cron fired.
+        // Hardcoding SCHEDULED here would have mislabelled every manual sweep.
+        trigger,
       })),
     });
 
@@ -192,13 +210,13 @@ export class SchedulerService implements OnModuleInit {
       select: { id: true },
     });
 
-    this.logger.log(`"${label}" fanned out to ${runs.length} keyword(s) — batch ${batchId}`);
+    this.logger.log(`"${job.name}" fanned out to ${runs.length} keyword(s) — batch ${batchId}`);
     return runs.map((r) => r.id);
   }
 
-  private async createSingleRun(jobId: string): Promise<string> {
+  private async createSingleRun(jobId: string, trigger: RunTrigger): Promise<string> {
     const run = await this.prisma.crawlRun.create({
-      data: { jobId, status: RunStatus.QUEUED, trigger: RunTrigger.SCHEDULED },
+      data: { jobId, status: RunStatus.QUEUED, trigger },
     });
     return run.id;
   }

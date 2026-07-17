@@ -117,6 +117,14 @@ export class EnvVars {
   @IsString()
   @IsOptional()
   ETSY_API_KEY?: string;
+
+  @IsString()
+  @IsOptional()
+  CRAWL_EXTRA_HEADERS_JSON = '{}';
+
+  @IsString()
+  @IsOptional()
+  CRAWL_COOKIES_JSON = '[]';
 }
 
 export function validateEnv(raw: Record<string, unknown>): EnvVars {

@@ -42,27 +42,47 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
   };
 
   async *search(ctx: CrawlContext): AsyncIterable<ProductRecord> {
-    if (!ctx.query) throw new Error('Amazon search requires a query');
+    const query = ctx.query;
 
-    let emitted = 0;
+    if (!query) {
+      throw new Error('Amazon search requires a query');
+    }
 
-    for (let page = 1; page <= ctx.maxPages; page++) {
-      if (ctx.signal.aborted || emitted >= ctx.maxItems) return;
+    const records = await this.drivers.withDriver(async (driver) => {
+      const collected: ProductRecord[] = [];
 
-      const url = `${this.origin}/s?k=${encodeURIComponent(ctx.query)}&page=${page}`;
+      for (let page = 1; page <= ctx.maxPages; page++) {
+        if (ctx.signal.aborted || collected.length >= ctx.maxItems) {
+          break;
+        }
 
-      const records = await this.drivers.withDriver(async (driver) => {
+        const url = `${this.origin}/s?k=${encodeURIComponent(query)}&page=${page}`;
+
         await this.navigate(driver, url, ctx);
-        return this.parseSearchPage(driver, `Amazon page ${page}`);
-      });
 
-      if (records.length === 0) return;
+        const pageRecords = await this.parseSearchPage(
+          driver,
+          `Amazon page ${page}`,
+        );
 
-      for (const record of records) {
-        if (emitted >= ctx.maxItems) return;
-        yield record;
-        emitted++;
+        if (pageRecords.length === 0) {
+          break;
+        }
+
+        for (const record of pageRecords) {
+          collected.push(record);
+
+          if (collected.length >= ctx.maxItems) {
+            break;
+          }
+        }
       }
+
+      return collected;
+    });
+
+    for (const record of records) {
+      yield record;
     }
   }
 

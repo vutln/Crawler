@@ -3,6 +3,32 @@ import { ConfigService } from '@nestjs/config';
 import { Builder, type WebDriver, logging } from 'selenium-webdriver';
 import { Options as ChromeOptions } from 'selenium-webdriver/chrome';
 
+type SameSite = 'Strict' | 'Lax' | 'None';
+
+interface SeedCookie {
+  name: string;
+  value: string;
+
+  // CDP can use url to determine the cookie domain before visiting the site.
+  url?: string;
+  domain?: string;
+  path?: string;
+
+  secure?: boolean;
+  httpOnly?: boolean;
+  sameSite?: SameSite;
+
+  // Seconds since Unix epoch.
+  expires?: number;
+}
+
+type DevToolsWebDriver = WebDriver & {
+  sendDevToolsCommand(
+    command: string,
+    parameters?: Record<string, unknown>,
+  ): Promise<void>;
+};
+
 /**
  * Owns every WebDriver in the process.
  *
@@ -23,6 +49,9 @@ export class WebDriverFactory implements OnModuleDestroy {
   private readonly maxDrivers: number;
   private readonly userAgent: string;
 
+  private readonly extraHeaders: Record<string, string>;
+  private readonly seedCookies: SeedCookie[];
+
   /** Resolvers waiting for a slot when maxDrivers is saturated. */
   private readonly waiters: Array<() => void> = [];
   private leased = 0;
@@ -31,8 +60,79 @@ export class WebDriverFactory implements OnModuleDestroy {
     this.headless = this.config.get<boolean>('SELENIUM_HEADLESS', true);
     this.timeoutMs = this.config.get<number>('SELENIUM_TIMEOUT_MS', 30_000);
     this.maxDrivers = this.config.get<number>('SELENIUM_MAX_DRIVERS', 2);
-    // '' is meaningful here — see create(). Do NOT give this a fallback.
     this.userAgent = this.config.get<string>('CRAWL_USER_AGENT', '');
+
+    this.extraHeaders = this.validateExtraHeaders(
+      this.parseJson<Record<string, string>>('CRAWL_EXTRA_HEADERS_JSON', {}),
+    );
+
+    this.seedCookies = this.parseJson<SeedCookie[]>('CRAWL_COOKIES_JSON', []);
+  }
+
+  private parseJson<T>(key: string, fallback: T): T {
+    const raw = this.config.get<string>(key, '');
+
+    if (!raw) {
+      return fallback;
+    }
+
+    try {
+      return JSON.parse(raw) as T;
+    } catch (error) {
+      throw new Error(
+        `${key} must contain valid JSON: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  private readonly forbiddenExtraHeaders = new Set([
+    'accept-encoding',
+    'connection',
+    'content-length',
+    'cookie',
+    'host',
+    'origin',
+    'referer',
+    'sec-ch-ua',
+    'sec-ch-ua-mobile',
+    'sec-ch-ua-platform',
+    'sec-fetch-dest',
+    'sec-fetch-mode',
+    'sec-fetch-site',
+    'sec-fetch-user',
+    'transfer-encoding',
+  ]);
+
+  private validateExtraHeaders(
+    headers: Record<string, string>,
+  ): Record<string, string> {
+    const validated: Record<string, string> = {};
+
+    for (const [name, value] of Object.entries(headers)) {
+      const normalizedName = name.trim().toLowerCase();
+
+      if (!normalizedName) {
+        throw new Error('Custom header name cannot be empty');
+      }
+
+      if (this.forbiddenExtraHeaders.has(normalizedName)) {
+        throw new Error(
+          `Do not manually set "${name}"; Chrome must generate it`,
+        );
+      }
+
+      if (
+        typeof value !== 'string' ||
+        value.includes('\r') ||
+        value.includes('\n')
+      ) {
+        throw new Error(`Invalid value for custom header "${name}"`);
+      }
+
+      validated[name] = value;
+    }
+
+    return validated;
   }
 
   /** Borrow a driver and always give it back — any early return would leak a browser. */
@@ -97,10 +197,24 @@ export class WebDriverFactory implements OnModuleDestroy {
 
     options.excludeSwitches('enable-logging', 'enable-automation');
 
-    const driver = await new Builder()
+    const driver = (await new Builder()
       .forBrowser('chrome')
       .setChromeOptions(options)
-      .build();
+      .build()) as DevToolsWebDriver;
+
+    await driver.sendDevToolsCommand('Network.enable');
+
+    if (Object.keys(this.extraHeaders).length > 0) {
+      await driver.sendDevToolsCommand('Network.setExtraHTTPHeaders', {
+        headers: this.extraHeaders,
+      });
+    }
+
+    if (this.seedCookies.length > 0) {
+      await driver.sendDevToolsCommand('Network.setCookies', {
+        cookies: this.seedCookies,
+      });
+    }
 
     await driver.manage().setTimeouts({
       pageLoad: this.timeoutMs,

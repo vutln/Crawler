@@ -122,8 +122,27 @@ export function parseRating(input: string | null | undefined): number | undefine
 }
 
 /** "1,234 ratings" | "(2.5k)" -> 1234 | 2500 */
+/**
+ * Reject strings that are plainly not a review count before stripping digits.
+ *
+ * Stripping non-digits from a rating produces a confident wrong answer rather
+ * than no answer: "4.5 out of 5 stars" -> "455" -> 455 reviews. That is worse
+ * than undefined, because nothing downstream can tell it from a real count.
+ *
+ * This fires in practice. Amazon's review selector used to match the rating
+ * popover, and textOf() returns the first non-empty node under it — so the
+ * rating string was what reached this function on a real crawl.
+ *
+ * Deliberately does NOT reject /rating/: Amazon's own review-count hook is
+ * aria-label="1,648 ratings", so screening that word out would discard the one
+ * reliable signal on the page. "out of" and "stars" are what separate a rating
+ * from a count; "ratings" is what a count is called.
+ */
+const NOT_A_REVIEW_COUNT = /out of|\bstars?\b/i;
+
 export function parseReviewCount(input: string | null | undefined): number | undefined {
   if (!input) return undefined;
+  if (NOT_A_REVIEW_COUNT.test(input)) return undefined;
 
   const k = /(\d+([.,]\d+)?)\s*k\b/i.exec(input);
   if (k) return Math.round(Number.parseFloat(k[1].replace(',', '.')) * 1000);
@@ -162,12 +181,31 @@ export function canonicalUrl(input: string, base?: string): string {
   }
 }
 
-/** Uppercase ISO-4217, defaulting when a marketplace omits it. */
+/**
+ * ISO-4217 code for "no currency involved". Stored when a listing's currency
+ * could not be determined, alongside a null price — see CrawlRunnerService.upsert.
+ */
+export const UNKNOWN_CURRENCY = 'XXX';
+
+/**
+ * Uppercase ISO-4217, or null when the marketplace didn't tell us.
+ *
+ * Returns null rather than defaulting to USD, and that is the whole point. This
+ * used to take `fallback = 'USD'`, which meant any price whose symbol wasn't
+ * scraped was stamped USD regardless of what it actually was. Combined with a
+ * non-US egress — amazon.com geolocates, and test/fixtures/amazon/search.html is
+ * 175 occurrences of VND captured from www.amazon.com — a ₫2,490,000 keyboard
+ * was stored as $2,490,000.00 and was indistinguishable from a real price in the
+ * table, the chart and the CSV.
+ *
+ * This file already makes exactly this argument for parsePrice ("Returns null,
+ * never 0 — 0 poisons every average"). A guessed currency poisons the same
+ * averages and is harder to spot, because the number itself looks fine.
+ */
 export function normalizeCurrency(
   currency: string | null | undefined,
-  fallback = 'USD',
-): string {
-  if (!currency) return fallback;
+): string | null {
+  if (!currency) return null;
   const upper = currency.toUpperCase().trim();
-  return /^[A-Z]{3}$/.test(upper) ? upper : fallback;
+  return /^[A-Z]{3}$/.test(upper) ? upper : null;
 }

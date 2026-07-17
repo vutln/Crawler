@@ -38,8 +38,32 @@ export class EtsySeleniumAdapter extends SeleniumAdapterBase {
     image: ['img.wt-width-full', 'img[data-listing-card-listing-image]', 'img'],
     shop: ['p.wt-text-gray span', 'span.wt-text-truncate'],
     rating: ['span[aria-label*="out of 5 stars"]', 'input[name="rating"]'],
+    /**
+     * These are generic Etsy typography utilities, not review hooks — they match
+     * whatever text happens to sit in a body-01 span, which is why parseCard
+     * screens the result through REVIEW_COUNT_SHAPE below rather than trusting it.
+     *
+     * Unverified against real markup: there is no Etsy fixture (test/fixtures has
+     * only amazon/ and ebay/) and Etsy is currently blocking this egress, so a
+     * tighter selector can't be confirmed. Capture one via `npm run fixtures:capture`
+     * from an unblocked host and tighten this then.
+     */
     reviews: ['span.wt-text-body-01', 'p.wt-text-caption span'],
   };
+
+  /**
+   * Etsy renders the review count parenthesised next to the stars: "(1,234)".
+   *
+   * Required because sel.reviews is generic enough to match unrelated card text,
+   * and parseReviewCount strips non-digits — so "Ad by Shop2024" yielded 2024, a
+   * confident wrong number in the right column. Anything not shaped like a count
+   * is discarded. If Etsy restyles this, the field goes undefined (honest and
+   * visible) rather than silently wrong.
+   */
+  private static readonly REVIEW_COUNT_SHAPE = /^\(\s*[\d.,]+\s*k?\s*\)$/i;
+
+  /** Same list as sel.reviews; kept separate because reviewCountText walks ALL matches. */
+  private static readonly REVIEW_CANDIDATES = ['span.wt-text-body-01', 'p.wt-text-caption span'];
 
   async *search(ctx: CrawlContext): AsyncIterable<ProductRecord> {
     if (!ctx.query) throw new Error('Etsy search requires a query');
@@ -119,9 +143,27 @@ export class EtsySeleniumAdapter extends SeleniumAdapterBase {
       imageUrl: await this.attrOf(el, this.sel.image, 'src'),
       seller: cleanText((await this.textOf(el, this.sel.shop)) ?? '', 191) || undefined,
       rating: parseRating(await this.attrOf(el, this.sel.rating, 'aria-label')),
-      reviewCount: parseReviewCount(await this.textOf(el, this.sel.reviews)),
+      reviewCount: parseReviewCount(await this.reviewCountText(el)),
       raw: { symbol, value },
     };
+  }
+
+  /**
+   * First candidate that actually looks like a review count, else undefined.
+   *
+   * Can't use textOf() alone: it returns the first NON-EMPTY match, and these
+   * selectors are generic typography, so the first hit is usually shop or price
+   * text. Walk the candidates and keep the one matching REVIEW_COUNT_SHAPE.
+   */
+  private async reviewCountText(el: WebElement): Promise<string | undefined> {
+    for (const selector of EtsySeleniumAdapter.REVIEW_CANDIDATES) {
+      const els = await el.findElements(By.css(selector)).catch(() => []);
+      for (const candidate of els) {
+        const text = (await candidate.getText().catch(() => ''))?.trim();
+        if (text && EtsySeleniumAdapter.REVIEW_COUNT_SHAPE.test(text)) return text;
+      }
+    }
+    return undefined;
   }
 
   async fetchProduct(url: string, ctx: CrawlContext): Promise<ProductRecord | null> {

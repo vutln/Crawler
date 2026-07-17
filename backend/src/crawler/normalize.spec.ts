@@ -91,10 +91,30 @@ describe('detectCurrency', () => {
 });
 
 describe('normalizeCurrency', () => {
-  it('falls back when absent or malformed', () => {
-    expect(normalizeCurrency(null)).toBe('USD');
-    expect(normalizeCurrency('dollars')).toBe('USD');
+  it('uppercases a valid ISO-4217 code', () => {
     expect(normalizeCurrency('eur')).toBe('EUR');
+    expect(normalizeCurrency(' vnd ')).toBe('VND');
+  });
+
+  /**
+   * REGRESSION — this function used to take `fallback = 'USD'` and return it for
+   * anything it couldn't parse, which silently relabelled money.
+   *
+   * The damage needed a second ingredient this repo also has: amazon.com
+   * geolocates, and test/fixtures/amazon/search.html was captured from a Vietnam
+   * IP with 175 occurrences of VND. parsePrice reads a bare "3.674.457" as
+   * 3674457 with currency null, the old fallback stamped it USD, and the products
+   * table showed $3,674,457.00 — a number that looks entirely real.
+   *
+   * Returning null forces the caller to decide, and CrawlRunnerService.upsert
+   * decides by refusing to store the price at all. Same argument the file already
+   * makes for parsePrice returning null rather than 0.
+   */
+  it('returns null rather than guessing USD when the currency is unknown', () => {
+    expect(normalizeCurrency(null)).toBeNull();
+    expect(normalizeCurrency(undefined)).toBeNull();
+    expect(normalizeCurrency('')).toBeNull();
+    expect(normalizeCurrency('dollars')).toBeNull();
   });
 });
 
@@ -123,6 +143,34 @@ describe('parseReviewCount', () => {
 
   it('returns undefined with no digits', () => {
     expect(parseReviewCount('no reviews yet')).toBeUndefined();
+  });
+
+  /**
+   * REGRESSION — a rating string reaching this function produced a confident
+   * wrong answer, not a null.
+   *
+   * Amazon's review selector was `[data-csa-c-func-deps="aui-da-a-popover"] span`
+   * — the RATING popover — and textOf() returns the first non-empty node under it.
+   * So "4.5 out of 5 stars" arrived here, got stripped to "455", and every Amazon
+   * product recorded 455 reviews. Nothing downstream could tell that from a real
+   * count. The selector is fixed (aria-label="1,648 ratings"); this is the belt
+   * that survives the next drift.
+   */
+  it.each([
+    ['4.5 out of 5 stars', '4.5 out of 5 stars'],
+    ['4.5 out of 5', '4.5 out of 5'],
+    ['4.5 stars', '4.5 stars'],
+    ['1 star', '1 star'],
+  ])('refuses to read a rating as a count: %s', (_label, input) => {
+    expect(parseReviewCount(input)).toBeUndefined();
+  });
+
+  // The word "ratings" is what a COUNT is called on Amazon — screening it out
+  // would discard the only reliable hook on the card. Only "out of"/"stars"
+  // distinguish a rating from a count.
+  it('still reads Amazon\'s own aria-label count', () => {
+    expect(parseReviewCount('1,648 ratings')).toBe(1648);
+    expect(parseReviewCount('13 ratings')).toBe(13);
   });
 });
 

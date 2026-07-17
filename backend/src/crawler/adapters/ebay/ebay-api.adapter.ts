@@ -114,6 +114,17 @@ export class EbayApiAdapter implements MarketplaceAdapter {
       imageUrl: item.image?.imageUrl,
       seller: item.seller?.username,
       brand: item.brand,
+      // reviewCount is deliberately NOT set, and seller.feedbackScore is NOT the
+      // value to reach for — it is the SELLER's lifetime feedback, not this
+      // product's reviews. Mapping it would be the same lie etsy-api used to tell
+      // with num_favorers: a real-looking number under the wrong name.
+      //
+      // eBay's Browse API item_summary/search has no product-review field at all,
+      // so this path genuinely cannot supply it. capabilities.reviewCount is false
+      // here; ebay-selenium reads the card's "(1,234)" if you need it.
+      //
+      // Leaving it undefined rather than null is load-bearing — see ProductRecord:
+      // it stops this adapter erasing counts ebay-selenium collected.
       raw: item,
     };
   }

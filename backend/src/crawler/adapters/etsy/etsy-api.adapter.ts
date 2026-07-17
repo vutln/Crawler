@@ -101,7 +101,16 @@ export class EtsyApiAdapter implements MarketplaceAdapter {
       inStock: (listing.quantity ?? 0) > 0,
       imageUrl: listing.images?.[0]?.url_570xN ?? listing.images?.[0]?.url_fullxfull,
       seller: listing.shop_id ? String(listing.shop_id) : undefined,
-      reviewCount: listing.num_favorers,
+      // reviewCount is deliberately NOT set. This used to be `listing.num_favorers`,
+      // which is Etsy's favourites/hearts count — a different quantity entirely,
+      // and worse than a null because it's a plausible integer sitting in the
+      // right column that nothing downstream can flag as wrong.
+      //
+      // Etsy v3's listing object carries no review count. Real counts need
+      // GET /listings/{id}/reviews per listing: ~128 extra calls per keyword per
+      // day, which at the 2s throttle floor is ~4 min per keyword. Not viable for
+      // a sweep, so this path reports undefined and capabilities.reviewCount says
+      // so. Use etsy-selenium if review counts matter more than speed.
       raw: listing,
     };
   }

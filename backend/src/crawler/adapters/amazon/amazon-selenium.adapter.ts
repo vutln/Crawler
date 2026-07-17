@@ -52,10 +52,23 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
       '[data-cy="reviews-ratings-slot"] span.a-icon-alt',
       'span.a-icon-alt',
     ],
-    reviews: [
-      '[data-csa-c-func-deps="aui-da-a-popover"] span',
-      'span.a-size-base.s-underline-text',
-    ],
+    /**
+     * Read as an ATTRIBUTE (aria-label), not text — see parseCard.
+     *
+     * Amazon labels the review-count link `aria-label="1,648 ratings"`, which is
+     * both stable and unambiguous. Verified against test/fixtures/amazon/search.html.
+     *
+     * What was here before was actively wrong in two ways. The first selector,
+     * `[data-csa-c-func-deps="aui-da-a-popover"] span`, is the RATING popover, and
+     * textOf returns its first non-empty node — "4.5 out of 5 stars" — which
+     * parseReviewCount stripped to 455. The second, `span.a-size-base.s-underline-text`,
+     * matches nothing at all: `s-underline-text` is on the <a>, not on a span with
+     * a-size-base. So every Amazon reviewCount was either 455-shaped garbage or absent.
+     *
+     * `$=` and not `*=`: the rating link is labelled "...stars, rating details",
+     * which contains "rating" but does not end in it.
+     */
+    reviews: ['a[aria-label$="ratings"]', 'a[aria-label$="rating"]'],
     brand: [
       'h5.s-line-clamp-1 span',
       '.a-row.a-size-base.a-color-secondary h5',
@@ -160,7 +173,12 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
       inStock: price !== null,
       imageUrl: await this.attrOf(el, this.sel.image, 'src'),
       rating: parseRating(await this.textOf(el, this.sel.rating)),
-      reviewCount: parseReviewCount(await this.textOf(el, this.sel.reviews)),
+      // attrOf, not textOf: the count lives in the link's aria-label ("1,648
+      // ratings"), and the link's visible text is styled markup we'd have to
+      // reassemble. See sel.reviews.
+      reviewCount: parseReviewCount(
+        await this.attrOf(el, this.sel.reviews, 'aria-label'),
+      ),
       brand:
         cleanText((await this.textOf(el, this.sel.brand)) ?? '', 191) ||
         undefined,

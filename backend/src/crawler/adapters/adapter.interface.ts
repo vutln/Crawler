@@ -12,9 +12,20 @@ export interface ProductRecord {
   title: string;
   /** null when the listing has no resolvable price — never 0. */
   price: number | null;
-  /** ISO-4217, uppercase. */
-  currency: string;
+  /**
+   * ISO-4217, uppercase, or null when the currency could not be determined.
+   *
+   * Null is not the same as USD, and the runner will refuse to store a price
+   * carrying a null currency rather than guess one. See normalizeCurrency.
+   */
+  currency: string | null;
   inStock: boolean;
+  /**
+   * Optional fields mean "this adapter did not look", NOT "there was nothing
+   * there" — the runner relies on that distinction to avoid overwriting a value
+   * another adapter collected. Leave a field `undefined` rather than passing
+   * null when your source has no such concept (see ebay-api and reviewCount).
+   */
   imageUrl?: string;
   rating?: number;
   reviewCount?: number;

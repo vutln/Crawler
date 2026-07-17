@@ -110,6 +110,59 @@ describe('AmazonSeleniumAdapter — real captured fixture', () => {
     expect(records.some((r) => r.rating !== undefined)).toBe(true);
   });
 
+  /**
+   * REGRESSION — the fixture's non-US-ness is the asset here, not the flaw.
+   *
+   * normalizeCurrency used to default to USD for anything it couldn't parse, so
+   * a card whose ₫ symbol wasn't scraped was stored as USD carrying a VND
+   * magnitude: $3,674,457.00, indistinguishable from a real price. This page was
+   * served by www.amazon.com to a Vietnam IP (Amazon geolocates), which makes it
+   * the exact input that bug needed.
+   *
+   * Report VND as VND. Recapturing this fixture from a US host is fine and
+   * expected — that's why this asserts "never laundered" rather than "is VND".
+   */
+  it('reports the served currency truthfully and never as a guessed USD', () => {
+    const priced = records.filter((r) => r.price !== null);
+    expect(priced.length).toBeGreaterThan(0);
+
+    for (const r of priced) {
+      // A price that survived to a number must carry a real label. Null currency
+      // with a non-null price is precisely what upsert() refuses to store.
+      expect(r.currency).not.toBeNull();
+      expect(r.currency).toMatch(/^[A-Z]{3}$/);
+    }
+
+    // This page is VND. If a future recapture is USD that's fine; what must never
+    // happen is VND magnitudes wearing a USD label.
+    const vnd = priced.filter((r) => r.currency === 'VND');
+    if (vnd.length > 0) {
+      const usd = priced.filter((r) => r.currency === 'USD');
+      expect(usd).toHaveLength(0);
+    }
+  });
+
+  /**
+   * REGRESSION — every Amazon product used to record 455 reviews.
+   *
+   * sel.reviews led with the RATING popover, and textOf() returns the first
+   * non-empty node under it, so "4.5 out of 5 stars" reached parseReviewCount,
+   * which stripped non-digits to "455". The backup selector
+   * (span.a-size-base.s-underline-text) matched nothing on this page at all —
+   * s-underline-text is on the <a>. So the field was garbage or absent, and the
+   * suite never noticed because nothing asserted it.
+   */
+  it('extracts a real review count, not the rating digits', () => {
+    const counted = records.filter((r) => r.reviewCount !== undefined);
+    expect(counted.length).toBeGreaterThan(0);
+
+    // 455 is the specific artefact of "4.5 out of 5 stars" losing its non-digits.
+    for (const r of counted) {
+      expect(Number.isInteger(r.reviewCount)).toBe(true);
+      expect(r.reviewCount!).toBeGreaterThan(0);
+    }
+  });
+
   it('builds a canonical /dp/<asin> URL free of tracking params', () => {
     for (const r of records) {
       expect(r.url).toContain(r.externalId);

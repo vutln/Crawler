@@ -3,6 +3,7 @@ import { Prisma, RunStatus, type CrawlJob } from '../../generated/prisma/client'
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdapterRegistry } from '../adapters/adapter.registry';
 import { BlockedError, type CrawlContext, type ProductRecord } from '../adapters/adapter.interface';
+import { UNKNOWN_CURRENCY } from '../normalize';
 
 export interface RunOutcome {
   status: RunStatus;
@@ -167,18 +168,47 @@ export class CrawlRunnerService {
       select: { id: true },
     });
 
+    /**
+     * Only what this adapter actually produced.
+     *
+     * These were `?? null`, and that spread into `update:` wrote NULL over every
+     * field the running adapter doesn't collect. Not hypothetical: ebay-api has
+     * no product review counts and outranks ebay-selenium (priority 100 vs 10),
+     * so setting EBAY_APP_ID didn't merely stop adding review counts — it erased
+     * the ones ebay-selenium had already stored, on every run, silently.
+     *
+     * Leaving them `undefined` is load-bearing: Prisma omits undefined fields
+     * from the UPDATE entirely, and falls back to the column default on INSERT.
+     * So `undefined` = "this adapter didn't look" = don't touch, while an
+     * explicit null would still mean "it looked and found nothing".
+     */
     const identity = {
       url: record.url,
       title: record.title,
-      brand: record.brand ?? null,
-      seller: record.seller ?? null,
-      imageUrl: record.imageUrl ?? null,
-      currency: record.currency,
-      rating: record.rating != null ? new Prisma.Decimal(record.rating) : null,
-      reviewCount: record.reviewCount ?? null,
+      brand: record.brand,
+      seller: record.seller,
+      imageUrl: record.imageUrl,
+      rating: record.rating != null ? new Prisma.Decimal(record.rating) : undefined,
+      reviewCount: record.reviewCount,
     };
 
-    const price = record.price != null ? new Prisma.Decimal(record.price) : null;
+    /**
+     * A price we cannot label is not a price.
+     *
+     * Refusing it here is what makes the currency honest end to end: parsePrice
+     * happily reads "3.674.457" off an Amazon card as 3674457 with no symbol, and
+     * storing that under a guessed USD is how ₫ prices became $3,674,457.
+     */
+    const labelled = record.currency !== null;
+    const price =
+      labelled && record.price != null ? new Prisma.Decimal(record.price) : null;
+
+    if (record.price != null && !labelled) {
+      this.logger.warn(
+        `${marketplace} ${record.externalId}: price ${record.price} has no detectable ` +
+          `currency — storing price as null rather than guessing one.`,
+      );
+    }
 
     // One transaction: the snapshot and the denormalized mirror on Product must
     // land together or not at all. If these could diverge, the products list
@@ -192,12 +222,19 @@ export class CrawlRunnerService {
           marketplace,
           externalId: record.externalId,
           ...identity,
+          // Column is NOT NULL, so an unknown currency needs a value. XXX is the
+          // ISO-4217 code for "no currency involved" and it always rides with a
+          // null price — never a number wearing a currency we invented.
+          currency: record.currency ?? UNKNOWN_CURRENCY,
           currentPrice: price,
           inStock: record.inStock,
           snapshotCount: 1,
         },
         update: {
           ...identity,
+          // Same rule as `identity`: don't let a run that failed to read the
+          // currency overwrite one an earlier run read correctly.
+          ...(record.currency !== null && { currency: record.currency }),
           currentPrice: price,
           inStock: record.inStock,
           snapshotCount: { increment: 1 },
@@ -210,7 +247,7 @@ export class CrawlRunnerService {
         data: {
           productId: product.id,
           price,
-          currency: record.currency,
+          currency: record.currency ?? UNKNOWN_CURRENCY,
           inStock: record.inStock,
           seller: record.seller ?? null,
           crawlRunId: runId,

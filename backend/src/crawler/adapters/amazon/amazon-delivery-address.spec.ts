@@ -32,6 +32,15 @@ const SEARCH_PAGE = `<html><head><title>Amazon.com : keyboard</title></head><bod
 const HOME_URL = 'https://www.amazon.com/';
 const SEARCH_URL = 'https://www.amazon.com/s?k=keyboard&page=1';
 
+/**
+ * Selenium's control keys (Key.RETURN and friends) occupy the Unicode private-use
+ * area. Built from char codes rather than written as a literal class: invisible
+ * characters in source are unreviewable, and lint rejects them outright.
+ */
+const CONTROL_KEY = new RegExp(
+  `^[${String.fromCharCode(0xe000)}-${String.fromCharCode(0xf8ff)}]+$`,
+);
+
 const BODY_TEXT =
   'Skip to main content Deliver to Holtsville 00501 All Departments ' +
   'No results for keyboard. Try checking your spelling. Back to top ' +
@@ -106,9 +115,29 @@ describe('AmazonSeleniumAdapter — delivery address', () => {
       },
       clear: () => Promise.resolve(),
       sendKeys: (v: string) => {
-        typed = v;
-        loadsAtType = pageLoads;
-        events.push(`type:${v}`);
+        /**
+         * Selenium control keys live in the Unicode private-use area (Key.RETURN
+         * is U+E006), and they arrive through the same sendKeys as real text. A
+         * naive `typed = v` therefore has the Enter keystroke overwrite the value
+         * that was just typed — which looks exactly like "the ZIP was never
+         * entered" while the log says it was.
+         */
+        const isControlKey = CONTROL_KEY.test(v);
+        if (!isControlKey) {
+          typed = v;
+          loadsAtType = pageLoads;
+        }
+        events.push(`type:${isControlKey ? '<ENTER>' : v}`);
+
+        // Submitting a search navigates. The fake has to model that or
+        // getCurrentUrl still reports the page we typed ON, and every URL
+        // assertion downstream reads as a failed search.
+        if (isControlKey) {
+          loads.push(SEARCH_URL);
+          events.push(`get:${urlLabel(SEARCH_URL)}`);
+          pageLoads++;
+          waited = false;
+        }
         return Promise.resolve();
       },
       getText: () => Promise.resolve(text),
@@ -192,12 +221,34 @@ describe('AmazonSeleniumAdapter — delivery address', () => {
    * @param drivers one per `withDriver` call, in order. Passing more than one is
    * how the per-BROWSER guarantee gets tested: the adapter's `addressed` WeakSet
    * keys on the driver object, so distinct drivers must each be addressed.
+   *
+   * The homepage entry is OFF here by default, and that is a scoping decision
+   * rather than a claim about the product. This file is about what happens to the
+   * address; entering the session is its own step with its own spec
+   * (steps.spec.ts), and mixing them would make every assertion below depend on
+   * which door the crawl came in. The homepage path gets one dedicated test at the
+   * bottom, asserting the thing that actually matters — that the address is still
+   * applied when we arrive that way.
    */
   function makeAdapter(zip: string, ...drivers: WebDriver[]) {
+    return buildAdapter(zip, { homepage: false }, drivers);
+  }
+
+  /** Same, with the session opening on the homepage. One test uses this. */
+  function makeAdapterViaHomepage(zip: string, ...drivers: WebDriver[]) {
+    return buildAdapter(zip, { homepage: true }, drivers);
+  }
+
+  function buildAdapter(
+    zip: string,
+    opts: { homepage: boolean },
+    drivers: WebDriver[],
+  ) {
     const config = {
       get: (key: string, fallback?: unknown) =>
         ({
           AMAZON_DELIVERY_ZIP: zip,
+          AMAZON_ENTRY_HOMEPAGE: opts.homepage ? 'true' : 'false',
           CRAWL_MIN_DELAY_MS: 1,
           CRAWL_MAX_BACKOFF_MS: 1000,
         })[key] ?? fallback,
@@ -285,9 +336,14 @@ describe('AmazonSeleniumAdapter — delivery address', () => {
    * working fine: "No location widget after 15s ... Delivery address not set",
    * followed by a perfectly good 108-product run with no US prices.
    *
-   * The nav is global. Never go to the homepage for it.
+   * SCOPE NOTE, because this test's claim narrowed when session entry was added.
+   * The crawl may now open on the homepage deliberately — enterSession tries it and
+   * falls back when it is walled, which is a decision made with the measurement
+   * above in hand. What must still never happen is the ADDRESS FLOW going there on
+   * its own initiative: it works on whatever page the crawl already wanted, because
+   * the nav is global. That is what this pins, and it is the part that broke.
    */
-  it('never loads the homepage — the widget is on the page we already wanted', async () => {
+  it('the address flow never navigates to the homepage on its own', async () => {
     const { driver, homepageLoadCount, typed } = makeDriver();
     await drain(makeAdapter('00501', driver), ctx());
 
@@ -450,5 +506,41 @@ describe('AmazonSeleniumAdapter — delivery address', () => {
 
     // Reaching sendKeys at all means the gate survived the late render.
     expect(typed()).toBe('00501');
+  });
+
+  /**
+   * The other door. Every test above runs with homepage entry off to isolate the
+   * address; this one turns it on and checks the address survives that path.
+   *
+   * The nav is global, so arriving via the homepage is fine for the widget — what
+   * would NOT be fine is the address quietly being skipped because the recipe
+   * changed which page it happens on. Entry itself (probe, fallback, non-block
+   * errors) is covered by steps.spec.ts; this is purely the handoff.
+   */
+  it('still sets the address when the session opens on the homepage', async () => {
+    const { driver, homepageLoadCount, events } = makeDriver();
+    const adapter = makeAdapterViaHomepage('00501', driver);
+    await drain(adapter, ctx());
+
+    expect(homepageLoadCount()).toBeGreaterThan(0); // we did come in that way
+
+    // NOT typed(): on this path the search query is typed after the ZIP, so the
+    // last-value-wins helper reports "keyboard". The event log is the precise
+    // record, and it shows both in the order they happened.
+    // The whole session, in order: arrive, set the address, search, then read.
+    expect(events.filter((e) => e !== 'click')).toEqual([
+      'get:HOME',
+      'type:00501',
+      'get:HOME', // the address verification reload
+      'type:keyboard',
+      'type:<ENTER>',
+      'get:SEARCH',
+      'parse',
+    ]);
+
+    // And the search actually landed where it claimed — no fallback needed.
+    expect(adapter.__logged).not.toContain(
+      expect.stringMatching(/landed somewhere unexpected/),
+    );
   });
 });

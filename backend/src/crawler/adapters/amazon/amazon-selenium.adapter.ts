@@ -11,6 +11,9 @@ import {
 } from '../../normalize';
 import { SeleniumAdapterBase } from '../selenium-adapter.base';
 import type { CrawlContext, ProductRecord } from '../adapter.interface';
+import { enterSession } from '../steps/enter-session.step';
+import { fillAndSubmit } from '../steps/fill-and-submit.step';
+import { nextPage, type PaginationConfig } from '../steps/next-page.step';
 
 /**
  * How long to wait for the nav to render before believing the location widget
@@ -120,6 +123,12 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
      * internal name for this widget; the ids have been stable for years but are
      * exactly the kind of thing the canary tier exists to catch drifting.
      */
+    /**
+     * The nav search box. Verified live 2026-07-20: typing here and pressing Enter
+     * returned an identical 48 cards to the built URL, differing only by
+     * `&ref=nb_sb_noss` — Amazon's own marker for a nav-bar search.
+     */
+    searchInput: ['#twotabsearchtextbox', 'input[name="field-keywords"]'],
     locationLink: ['#nav-global-location-popover-link', '#glow-ingress-line2'],
     zipInput: ['#GLUXZipUpdateInput'],
     zipApply: [
@@ -148,6 +157,29 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
   /** Read lazily — @Inject properties are not populated during construction. */
   private get deliveryZip(): string {
     return this.config.get<string>('AMAZON_DELIVERY_ZIP', '').trim();
+  }
+
+  /**
+   * Homepage to open the session on, or undefined to go straight to the results.
+   *
+   * Configurable because the evidence cuts both ways. Entering through the front
+   * door and typing is how a person arrives, and earns the session a referrer
+   * chain before any search. But amazon.com/ is the most challenged page on the
+   * site — measured 2026-07-20 returning a 2KB AWS WAF page with no nav while a
+   * search URL returned 1.7MB in the same browser seconds apart.
+   *
+   * enterSession falls back cleanly when that happens, so the cost of trying is
+   * one wasted request; the cost of NOT trying is a crawl that always looks like a
+   * bot arriving cold. Left on by default, one env var to settle it either way.
+   */
+  private get entryHomepage(): string | undefined {
+    const raw = this.config
+      .get<string>('AMAZON_ENTRY_HOMEPAGE', 'true')
+      .toString()
+      .trim()
+      .toLowerCase();
+    if (raw === 'false' || raw === '0' || raw === '') return undefined;
+    return `${this.origin}/`;
   }
 
   /**
@@ -285,23 +317,8 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
     }
   }
 
-  /** First selector with a clickable match. False when none can be clicked. */
-  private async clickFirst(
-    driver: WebDriver,
-    selectors: string[],
-  ): Promise<boolean> {
-    for (const selector of selectors) {
-      for (const el of await driver.findElements(By.css(selector))) {
-        try {
-          await el.click();
-          return true;
-        } catch {
-          continue; // covered by another element, or detached mid-render
-        }
-      }
-    }
-    return false;
-  }
+  // clickFirst moved up to SeleniumAdapterBase — it was the only DOM-mutating
+  // helper in any adapter, and three steps need it now.
 
   /**
    * ONE browser for the whole run, and records streamed as each page is parsed.
@@ -334,25 +351,63 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
     );
   }
 
-  /** The page loop, given a browser. Yields each record as it is parsed. */
+  /**
+   * The recipe: one browsing session, assembled from steps.
+   *
+   * Reads top to bottom the way the crawl actually happens — arrive, set
+   * preferences, search, then read and page through results. The steps are plain
+   * functions taking selectors and a strategy, so nothing here is Amazon-specific
+   * except the configuration handed to them and `ensureDeliveryAddress`, which is
+   * genuinely a one-site concern.
+   *
+   * The loop stays a `for` loop on purpose. Expressing it as a Repeat step would
+   * mean a uniform Step type, a way for "stop" to travel through the step
+   * protocol, and a way for the record stream to travel through it too — three
+   * abstractions bought to say something JavaScript already says.
+   */
   private async *searchIn(
     driver: WebDriver,
     query: string,
     ctx: CrawlContext,
   ): AsyncIterable<ProductRecord> {
-    let emitted = 0;
+    const rt = this.runtime(driver, ctx);
+    const searchUrl = (page: number) =>
+      `${this.origin}/s?k=${encodeURIComponent(query)}&page=${page}`;
 
+    // 1. Arrive. Prefers the homepage, falls back when it is walled or nav-less.
+    const entry = await enterSession(rt, {
+      homepage: this.entryHomepage,
+      ready: this.sel.searchInput,
+      fallbackUrl: searchUrl(1),
+    });
+
+    // 2. Preferences — before any results are read, so they are priced correctly.
+    // The nav is global, so this works from whichever door we came in.
+    await this.ensureDeliveryAddress(driver, ctx, entry.url);
+
+    // 3. Search. Only from the homepage; the fallback URL already IS the results.
+    if (entry.via === 'homepage') {
+      const landed = await fillAndSubmit(rt, {
+        input: this.sel.searchInput,
+        value: query,
+        submit: { via: 'enter' },
+        settled: this.sel.resultItem,
+        // Amazon renders spaces as '+' in ?k=. An autocomplete hijack or a "did
+        // you mean" correction changes this, and that is the whole point.
+        expectUrl: (u) =>
+          u.includes(`k=${encodeURIComponent(query).replace(/%20/g, '+')}`),
+      });
+
+      // The typed search went somewhere else — take the deterministic route so the
+      // dataset is the one the keyword actually asked for.
+      if (!landed) await rt.navigate(searchUrl(1));
+    }
+
+    // 4 + 5. Read this page, then move to the next. Streaming, so a block on page
+    // 2 cannot retroactively discard page 1.
+    let emitted = 0;
     for (let page = 1; page <= ctx.maxPages; page++) {
       if (ctx.signal.aborted || emitted >= ctx.maxItems) return;
-
-      const url = `${this.origin}/s?k=${encodeURIComponent(query)}&page=${page}`;
-
-      await this.navigate(driver, url, ctx);
-
-      // AFTER the page is loaded, not before: the widget we need lives in this
-      // page's own nav bar. Once per browser, so only page 1 pays for it, and it
-      // reloads this url so the cards below are priced for the new address.
-      await this.ensureDeliveryAddress(driver, ctx, url);
 
       const pageRecords = await this.parseSearchPage(
         driver,
@@ -366,7 +421,28 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
         yield record;
         emitted++;
       }
+
+      if (page < ctx.maxPages) {
+        const advanced = await nextPage(
+          rt,
+          this.pagination(searchUrl),
+          page + 1,
+        );
+        if (!advanced) return;
+      }
     }
+  }
+
+  /**
+   * URL pagination, not click, for now.
+   *
+   * It is what ships today and works, so the pilot's only new risk is the
+   * session/entry/submit flow rather than pagination as well. Click mode is
+   * verified working live (`a.s-pagination-next` → 48 cards on page 2) and is a
+   * one-line swap here when the rest has settled.
+   */
+  private pagination(searchUrl: (page: number) => string): PaginationConfig {
+    return { mode: 'url', url: searchUrl };
   }
 
   /**

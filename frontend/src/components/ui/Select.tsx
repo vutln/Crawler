@@ -1,4 +1,4 @@
-import { cn } from '@/lib/utils';
+import { cn } from '@/lib';
 
 /** Generic over the value type so callers get their own enum back, not `string`. */
 export function Select<T extends string>({

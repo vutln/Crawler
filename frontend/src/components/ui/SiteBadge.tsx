@@ -1,6 +1,6 @@
-import { MARKETPLACE } from '@/domain/marketplace';
-import { cn } from '@/lib/utils';
-import type { Marketplace } from '@/types/api';
+import { MARKETPLACE } from '@/domain';
+import { cn } from '@/lib';
+import type { Marketplace } from '@/types';
 
 /** Pure registry lookup — adding a marketplace needs no change here. */
 export function SiteBadge({ marketplace }: { marketplace: Marketplace }) {

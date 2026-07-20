@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
-import { cn } from '@/lib/utils';
+import { cn } from '@/lib';
 
 /**
  * A modal dialog, built on the native <dialog> element.

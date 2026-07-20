@@ -6,17 +6,17 @@ import {
 } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
+  ApiError,
   cancelCrawlRun,
   createCrawlJob,
   deleteCrawlJob,
   listCrawlJobs,
   listCrawlRuns,
+  queryKeys,
   triggerCrawl,
   updateCrawlJob,
-} from '@/api/endpoints';
-import { ApiError } from '@/api/http';
-import { queryKeys } from '@/api/queryKeys';
-import { isActiveStatus } from '@/domain/run-status';
+} from '@/api';
+import { isActiveStatus } from '@/domain';
 import type {
   CrawlJob,
   CrawlRun,
@@ -24,7 +24,7 @@ import type {
   CreateCrawlJobInput,
   UpdateCrawlJobInput,
   PaginatedCrawlRuns,
-} from '@/types/api';
+} from '@/types';
 
 export function useCrawlJobs() {
   return useQuery({

@@ -8,10 +8,9 @@ import {
   SiteBadge,
   SkeletonRows,
 } from '@/components/ui';
-import { isActiveStatus } from '@/domain/run-status';
-import { useCancelRun, useCrawlRuns } from '@/hooks/useCrawls';
-import { useCrawlRunsQueryParams } from '@/hooks/useCrawlRunsQueryParams';
-import { formatDuration, formatRelative } from '@/lib/utils';
+import { isActiveStatus } from '@/domain';
+import { useCancelRun, useCrawlRuns, useCrawlRunsQueryParams } from '@/hooks';
+import { formatDuration, formatRelative } from '@/lib';
 
 export function RunsTable() {
   const { filters, setFilters, reset, query, hasActiveFilters } = useCrawlRunsQueryParams();

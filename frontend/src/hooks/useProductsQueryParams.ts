@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { isMarketplace } from '@/domain/marketplace';
-import type { Marketplace, ProductListQuery, ProductSortBy, SortOrder } from '@/types/api';
+import { isMarketplace } from '@/domain';
+import type { Marketplace, ProductListQuery, ProductSortBy, SortOrder } from '@/types';
 
 export interface ProductFilters {
   page: number;

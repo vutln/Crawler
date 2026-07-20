@@ -1,8 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { isMarketplace } from '@/domain/marketplace';
-import { isRunStatus } from '@/domain/run-status';
-import type { CrawlRunListQuery, Marketplace, RunStatus } from '@/types/api';
+import { isMarketplace, isRunStatus } from '@/domain';
+import type { CrawlRunListQuery, Marketplace, RunStatus } from '@/types';
 
 export interface RunFilters {
   page: number;

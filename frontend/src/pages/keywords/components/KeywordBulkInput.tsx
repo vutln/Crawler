@@ -1,9 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Button, Card } from '@/components/ui';
-import { useBulkCreateKeywords } from '@/hooks/useKeywords';
-import { parseKeywordList, submittableKeywords } from '@/lib/keywords';
-import { cn } from '@/lib/utils';
-import type { Keyword } from '@/types/api';
+import { useBulkCreateKeywords } from '@/hooks';
+import { cn, parseKeywordList, submittableKeywords } from '@/lib';
+import type { Keyword } from '@/types';
 
 /**
  * Paste a keyword list.

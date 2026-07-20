@@ -17,7 +17,7 @@ import type {
   StatsOverview,
   UpdateCrawlJobInput,
   UpdateKeywordInput,
-} from '@/types/api';
+} from '@/types';
 
 // `signal` threaded throughout so TanStack Query can cancel in-flight requests.
 

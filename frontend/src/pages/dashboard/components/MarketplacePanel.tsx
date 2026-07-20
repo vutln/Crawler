@@ -1,6 +1,6 @@
 import { Card, SiteBadge } from '@/components/ui';
-import { formatNumber } from '@/lib/utils';
-import type { MarketplaceStat } from '@/types/api';
+import { formatNumber } from '@/lib';
+import type { MarketplaceStat } from '@/types';
 
 /** Renders whatever the API reports — the backend enumerates its own enum. */
 export function MarketplacePanel({ stats }: { stats: MarketplaceStat[] }) {

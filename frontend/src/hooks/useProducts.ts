@@ -1,10 +1,15 @@
 import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { exportProductsCsv, getPriceHistory, getProduct, listProducts } from '@/api/endpoints';
-import { ApiError } from '@/api/http';
-import { queryKeys } from '@/api/queryKeys';
-import { downloadBlob } from '@/lib/download';
-import type { PriceHistoryInterval, ProductExportQuery, ProductListQuery } from '@/types/api';
+import {
+  ApiError,
+  exportProductsCsv,
+  getPriceHistory,
+  getProduct,
+  listProducts,
+  queryKeys,
+} from '@/api';
+import { downloadBlob } from '@/lib';
+import type { PriceHistoryInterval, ProductExportQuery, ProductListQuery } from '@/types';
 
 export function useProducts(query: ProductListQuery) {
   return useQuery({

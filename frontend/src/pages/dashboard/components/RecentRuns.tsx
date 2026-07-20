@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Card, JobStatusBadge, SiteBadge } from '@/components/ui';
-import { useCrawlRuns } from '@/hooks/useCrawls';
-import { formatRelative } from '@/lib/utils';
+import { useCrawlRuns } from '@/hooks';
+import { formatRelative } from '@/lib';
 
 export function RecentRuns() {
   const runs = useCrawlRuns({ page: 1, pageSize: 5 });

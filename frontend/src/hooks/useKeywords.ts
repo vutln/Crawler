@@ -1,15 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
+  ApiError,
   bulkCreateKeywords,
   createKeyword,
   deleteKeyword,
   listKeywords,
+  queryKeys,
   updateKeyword,
-} from '@/api/endpoints';
-import { ApiError } from '@/api/http';
-import { queryKeys } from '@/api/queryKeys';
-import type { UpdateKeywordInput } from '@/types/api';
+} from '@/api';
+import type { UpdateKeywordInput } from '@/types';
 
 /**
  * The keyword list — what the daily sweep collects.

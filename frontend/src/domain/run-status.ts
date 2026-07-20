@@ -1,4 +1,4 @@
-import type { RunStatus } from '@/types/api';
+import type { RunStatus } from '@/types';
 
 /** Same exhaustiveness contract as MARKETPLACE. */
 export interface RunStatusMeta {

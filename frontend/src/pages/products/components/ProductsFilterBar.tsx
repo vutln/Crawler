@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Button, Card, Input, Select } from '@/components/ui';
-import { useKeywords } from '@/hooks/useKeywords';
-import { MARKETPLACE_OPTIONS } from '@/domain/marketplace';
-import { useDebouncedValue } from '@/hooks/useDebouncedValue';
-import type { ProductFilters } from '@/hooks/useProductsQueryParams';
-import type { Marketplace } from '@/types/api';
+import { useDebouncedValue, useKeywords } from '@/hooks';
+import { MARKETPLACE_OPTIONS } from '@/domain';
+import type { ProductFilters } from '@/hooks';
+import type { Marketplace } from '@/types';
 
 const STOCK_OPTIONS = [
   { value: 'true' as const, label: 'In stock' },

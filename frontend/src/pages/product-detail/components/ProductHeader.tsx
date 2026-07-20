@@ -1,7 +1,7 @@
 import { Card, PriceDelta, SiteBadge, Thumbnail } from '@/components/ui';
-import { MARKETPLACE } from '@/domain/marketplace';
-import { formatCurrency, formatNumber } from '@/lib/utils';
-import type { Product } from '@/types/api';
+import { MARKETPLACE } from '@/domain';
+import { formatCurrency, formatNumber } from '@/lib';
+import type { Product } from '@/types';
 
 export function ProductHeader({ product }: { product: Product }) {
   return (

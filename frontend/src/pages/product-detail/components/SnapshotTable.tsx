@@ -1,6 +1,6 @@
 import { Card } from '@/components/ui';
-import { cn, formatCurrency, formatDateTime, formatRelative } from '@/lib/utils';
-import type { PricePoint, Product } from '@/types/api';
+import { cn, formatCurrency, formatDateTime, formatRelative } from '@/lib';
+import type { PricePoint, Product } from '@/types';
 
 export function SnapshotTable({
   points,

@@ -1,11 +1,15 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Button, Card, EmptyState, ErrorState, Spinner } from '@/components/ui';
-import { useProduct, usePriceHistory, type HistoryRange } from '@/hooks/useProducts';
-import { formatCurrency, formatNumber } from '@/lib/utils';
-import { PriceHistoryChart, usePriceSeries } from './components/PriceHistoryChart';
-import { ProductHeader, SnapshotStat } from './components/ProductHeader';
-import { SnapshotTable } from './components/SnapshotTable';
+import { useProduct, usePriceHistory, type HistoryRange } from '@/hooks';
+import { formatCurrency, formatNumber } from '@/lib';
+import {
+  PriceHistoryChart,
+  ProductHeader,
+  SnapshotStat,
+  SnapshotTable,
+  usePriceSeries,
+} from './components';
 
 const RANGES: HistoryRange[] = ['7d', '30d', '90d', 'all'];
 

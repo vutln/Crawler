@@ -1,4 +1,4 @@
-import { cn, formatPercent } from '@/lib/utils';
+import { cn, formatPercent } from '@/lib';
 
 /** Down is green: for a price tracker, a drop is good news. */
 export function PriceDelta({ value }: { value: number | null | undefined }) {

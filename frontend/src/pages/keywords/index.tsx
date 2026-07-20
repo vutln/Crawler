@@ -1,8 +1,7 @@
 import { Link } from 'react-router-dom';
 import { ErrorState } from '@/components/ui';
-import { useKeywords } from '@/hooks/useKeywords';
-import { KeywordBulkInput } from './components/KeywordBulkInput';
-import { KeywordsTable } from './components/KeywordsTable';
+import { useKeywords } from '@/hooks';
+import { KeywordBulkInput, KeywordsTable } from './components';
 
 /**
  * The keyword-list configuration screen.

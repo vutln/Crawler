@@ -9,8 +9,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { formatCurrency, formatDateTime } from '@/lib/utils';
-import type { PricePoint } from '@/types/api';
+import { formatCurrency, formatDateTime } from '@/lib';
+import type { PricePoint } from '@/types';
 
 export interface PriceStats {
   min: number;

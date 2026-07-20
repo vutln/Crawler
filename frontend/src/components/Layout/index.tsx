@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { env } from '@/env';
-import { cn } from '@/lib/utils';
+import { cn } from '@/lib';
 
 /** Ordered by workflow: configure → schedule → read → audit. */
 const NAV = [

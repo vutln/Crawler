@@ -1,4 +1,4 @@
-import type { CrawlRunListQuery, ProductListQuery } from '@/types/api';
+import type { CrawlRunListQuery, ProductListQuery } from '@/types';
 
 /** Hierarchical: invalidating a prefix nukes every filtered variant beneath it. */
 export const queryKeys = {

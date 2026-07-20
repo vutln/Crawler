@@ -1,14 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button, Field, Input, Select, Spinner } from '@/components/ui';
-import {
-  DEFAULT_MARKETPLACE,
-  MARKETPLACE,
-  MARKETPLACE_OPTIONS,
-} from '@/domain/marketplace';
-import { useCreateCrawlJob, useUpdateCrawlJob } from '@/hooks/useCrawls';
-import { useKeywords } from '@/hooks/useKeywords';
-import type { CrawlJob, Marketplace } from '@/types/api';
+import { DEFAULT_MARKETPLACE, MARKETPLACE, MARKETPLACE_OPTIONS } from '@/domain';
+import { useCreateCrawlJob, useKeywords, useUpdateCrawlJob } from '@/hooks';
+import type { CrawlJob, Marketplace } from '@/types';
 
 /**
  * Create or edit a SWEEP PLAN for one marketplace.

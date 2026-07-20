@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom';
 import { Button, Card, EmptyState, SkeletonRows } from '@/components/ui';
-import { useDeleteKeyword } from '@/hooks/useKeywords';
-import { formatNumber } from '@/lib/utils';
-import type { Keyword } from '@/types/api';
+import { useDeleteKeyword } from '@/hooks';
+import { formatNumber } from '@/lib';
+import type { Keyword } from '@/types';
 
 /**
  * The keyword list.

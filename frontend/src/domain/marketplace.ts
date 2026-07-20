@@ -1,4 +1,4 @@
-import type { Marketplace } from '@/types/api';
+import type { Marketplace } from '@/types';
 
 /**
  * Everything the UI knows about a marketplace.

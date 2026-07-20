@@ -1,6 +1,5 @@
 import { Link } from 'react-router-dom';
-import { CreateJobForm } from './components/CreateJobForm';
-import { JobsTable } from './components/JobsTable';
+import { CreateJobForm, JobsTable } from './components';
 
 export default function CrawlJobsPage() {
   return (

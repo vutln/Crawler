@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { Button, Card, EmptyState, ErrorState, JobStatusBadge, Modal, SiteBadge, Spinner } from '@/components/ui';
-import { useCrawlJobs, useDeleteCrawlJob, useTriggerCrawl } from '@/hooks/useCrawls';
-import { useKeywords } from '@/hooks/useKeywords';
-import { formatRelative } from '@/lib/utils';
+import { useCrawlJobs, useDeleteCrawlJob, useKeywords, useTriggerCrawl } from '@/hooks';
+import { formatRelative } from '@/lib';
 import { JobForm } from './JobForm';
 
 export function JobsTable() {

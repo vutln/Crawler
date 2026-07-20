@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { PriceDelta, SiteBadge, SkeletonRows, Thumbnail } from '@/components/ui';
-import { cn, formatCurrency, formatNumber, formatRelative } from '@/lib/utils';
-import type { Product, ProductSortBy, SortOrder } from '@/types/api';
+import { cn, formatCurrency, formatNumber, formatRelative } from '@/lib';
+import type { Product, ProductSortBy, SortOrder } from '@/types';
 
 const COLUMNS: Array<{ key: ProductSortBy | null; label: string; className?: string }> = [
   { key: 'title', label: 'Product' },

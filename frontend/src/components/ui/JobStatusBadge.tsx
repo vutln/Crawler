@@ -1,6 +1,6 @@
-import { RUN_STATUS } from '@/domain/run-status';
-import { cn } from '@/lib/utils';
-import type { RunStatus } from '@/types/api';
+import { RUN_STATUS } from '@/domain';
+import { cn } from '@/lib';
+import type { RunStatus } from '@/types';
 
 /** Pure registry lookup — adding a status needs no change here. */
 export function JobStatusBadge({ status }: { status: RunStatus }) {

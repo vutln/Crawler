@@ -1,9 +1,7 @@
 import { Button, Card, EmptyState, ErrorState, Pagination, Spinner } from '@/components/ui';
-import { useExportProductsCsv, useProducts } from '@/hooks/useProducts';
-import { useProductsQueryParams } from '@/hooks/useProductsQueryParams';
-import type { ProductExportQuery, ProductListQuery } from '@/types/api';
-import { ProductsFilterBar } from './components/ProductsFilterBar';
-import { ProductsTable } from './components/ProductsTable';
+import { useExportProductsCsv, useProducts, useProductsQueryParams } from '@/hooks';
+import type { ProductExportQuery, ProductListQuery } from '@/types';
+import { ProductsFilterBar, ProductsTable } from './components';
 
 export default function ProductsPage() {
   const { filters, setFilters, reset, query, hasActiveFilters } = useProductsQueryParams();

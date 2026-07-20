@@ -1,10 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
-import { getStatsOverview } from '@/api/endpoints';
-import { queryKeys } from '@/api/queryKeys';
+import { getStatsOverview, queryKeys } from '@/api';
 import { ErrorState, Spinner, StatTile } from '@/components/ui';
-import { formatNumber } from '@/lib/utils';
-import { MarketplacePanel } from './components/MarketplacePanel';
-import { RecentRuns } from './components/RecentRuns';
+import { formatNumber } from '@/lib';
+import { MarketplacePanel, RecentRuns } from './components';
 
 export default function DashboardPage() {
   const stats = useQuery({

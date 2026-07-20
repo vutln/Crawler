@@ -1,7 +1,5 @@
-import { useCrawlRuns } from '@/hooks/useCrawls';
-import { useCrawlRunsQueryParams } from '@/hooks/useCrawlRunsQueryParams';
-import { RunsFilterBar } from './components/RunsFilterBar';
-import { RunsTable } from './components/RunsTable';
+import { useCrawlRuns, useCrawlRunsQueryParams } from '@/hooks';
+import { RunsFilterBar, RunsTable } from './components';
 
 /**
  * Collection history.

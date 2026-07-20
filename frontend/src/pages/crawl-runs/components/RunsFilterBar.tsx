@@ -1,9 +1,7 @@
 import { Button, Card, Select } from '@/components/ui';
-import { MARKETPLACE_OPTIONS } from '@/domain/marketplace';
-import { RUN_STATUS_OPTIONS } from '@/domain/run-status';
-import { useCrawlJobs } from '@/hooks/useCrawls';
-import { useKeywords } from '@/hooks/useKeywords';
-import type { Marketplace, RunStatus } from '@/types/api';
+import { MARKETPLACE_OPTIONS, RUN_STATUS_OPTIONS } from '@/domain';
+import { useCrawlJobs, useKeywords } from '@/hooks';
+import type { Marketplace, RunStatus } from '@/types';
 
 /**
  * Filters the backend has always supported. status/marketplace/jobId existed on

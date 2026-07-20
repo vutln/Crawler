@@ -126,8 +126,25 @@ Before blaming the site or the code:
 
 - **Repeated probing walls the IP within a session.** After that everything measures the
   wall. Stop and wait hours; no code change fixes it.
-- **`pkill` doesn't match on Windows.** A stale process holds the port and you verify
-  old code. Check for `EADDRINUSE`.
+- **`EADDRINUSE` on :3000 — kill the WATCHER, not the child.** `npm run start:dev` is
+  `nest start --watch`, a parent process whose whole job is respawning
+  `node dist/src/main`. Killing whatever holds the port leaves the watcher alive, and it
+  rebinds seconds later. Worse, a watcher between rebuilds holds **no port at all**, so
+  `curl`/`netstat` report "clean" while it is very much alive. Never conclude a dev
+  server is stopped from a port check alone — enumerate processes:
+
+  ```bash
+  # what actually holds the port
+  netstat -ano | grep ":3000 " | grep LISTENING
+
+  # every node process for this project, parents included
+  wmic process where "name='node.exe'" get ProcessId,ParentProcessId,CommandLine /format:list \
+    | tr -d '\r' | grep -i crawler
+
+  taskkill //PID <watcher-pid> //T //F      # //T kills the tree, child included
+  ```
+
+  `pkill node` does not match on Windows, and killing all node is too broad anyway.
 - **`nest --watch` restarting** produces console 500s that aren't bugs.
 - **Waiting on a table shell** rather than a row reports "0 rows".
 - Frontend "not working" that's really Tailwind preflight (`margin: 0` kills the UA's

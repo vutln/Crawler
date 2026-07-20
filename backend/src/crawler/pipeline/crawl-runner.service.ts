@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Prisma, RunStatus, type CrawlJob, type Keyword } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdapterRegistry } from '../adapters/adapter.registry';
@@ -44,10 +45,15 @@ export class CrawlRunnerService {
   /** runId -> controller, so a run can be cancelled while in flight. */
   private readonly inFlight = new Map<string, AbortController>();
 
+  private readonly runTimeoutMs: number;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly registry: AdapterRegistry,
-  ) {}
+    config: ConfigService,
+  ) {
+    this.runTimeoutMs = config.get<number>('CRAWL_RUN_TIMEOUT_MS', 1_800_000);
+  }
 
   async execute(runId: string): Promise<RunOutcome> {
     const run = await this.prisma.crawlRun.findUnique({
@@ -58,6 +64,32 @@ export class CrawlRunnerService {
 
     const controller = new AbortController();
     this.inFlight.set(runId, controller);
+
+    /**
+     * Watchdog. Nothing else bounds a run's total duration.
+     *
+     * Selenium's timeouts cover a single page load, so a driver that stops
+     * responding between them — or an adapter loop that never terminates — leaves
+     * this run RUNNING for as long as the process lives. Because both trigger paths
+     * refuse a job that has an outstanding run, that one run disables the job
+     * indefinitely; the queue lane it holds never advances either.
+     *
+     * Reuses the cancellation path rather than adding a second kill mechanism: the
+     * adapters already check ctx.signal at every page boundary, so an abort unwinds
+     * exactly as a user-initiated cancel does. `timedOut` is what keeps the two
+     * distinguishable afterwards — a watchdog kill is a FAILURE to report, not a
+     * CANCELLED that implies somebody chose it.
+     */
+    let timedOut = false;
+    const watchdog = setTimeout(() => {
+      timedOut = true;
+      this.logger.error(
+        `Run ${runId} exceeded CRAWL_RUN_TIMEOUT_MS (${Math.round(
+          this.runTimeoutMs / 1000,
+        )}s) — aborting so it cannot block its job forever`,
+      );
+      controller.abort();
+    }, this.runTimeoutMs);
 
     await this.prisma.crawlRun.update({
       where: { id: runId },
@@ -78,7 +110,27 @@ export class CrawlRunnerService {
       outcome = { ...this.classify(err), ...toCounts(stats) };
       this.logger.error(`Run ${runId} failed: ${outcome.error}`);
     } finally {
+      clearTimeout(watchdog);
       this.inFlight.delete(runId);
+    }
+
+    /**
+     * A watchdog abort must not masquerade as a cancellation.
+     *
+     * collect() reports CANCELLED for any aborted signal, which is right when a
+     * human pressed cancel and wrong here — CANCELLED reads as "somebody chose to
+     * stop this", and a run that hung for half an hour is a fault worth surfacing.
+     * Applied after the try so it covers both paths: a clean unwind at the next
+     * signal check, and a throw from whatever the abort interrupted.
+     */
+    if (timedOut) {
+      outcome = {
+        status: RunStatus.FAILED,
+        error:
+          `Run exceeded CRAWL_RUN_TIMEOUT_MS (${Math.round(this.runTimeoutMs / 1000)}s) ` +
+          `and was aborted. Anything collected before that point was kept.`,
+        ...toCounts(stats),
+      };
     }
 
     await this.prisma.crawlRun.update({

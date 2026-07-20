@@ -101,6 +101,25 @@ export class EnvVars {
   @IsOptional()
   CRAWL_MAX_BACKOFF_MS = 900_000;
 
+  /**
+   * Hard ceiling on a single run, after which it is aborted and marked FAILED.
+   *
+   * A watchdog, not a performance budget. Nothing else bounds a run: Selenium's
+   * own timeouts cover one page load, so a driver that stops responding between
+   * them, or an adapter loop that never terminates, leaves the run RUNNING for as
+   * long as the process lives. Both trigger paths refuse a job with an outstanding
+   * run, so one hung run disables that job indefinitely.
+   *
+   * Generous on purpose — a 2-page crawl that waits out a 15-minute repeat-block
+   * cooldown is slow but healthy, and killing it would destroy real work. This
+   * fires only for runs that are genuinely stuck.
+   */
+  @IsInt()
+  @Min(60_000)
+  @Transform(({ value }) => parseInt(value as string, 10))
+  @IsOptional()
+  CRAWL_RUN_TIMEOUT_MS = 1_800_000; // 30 minutes
+
   @IsBoolean()
   @toBool()
   @IsOptional()

@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnApplicationBootstrap,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { RunStatus, type Marketplace } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CrawlRunnerService } from '../pipeline/crawl-runner.service';
@@ -54,7 +59,9 @@ interface Lane {
  * becomes a requirement, implement ICrawlQueue with BullMQ; nothing else changes.
  */
 @Injectable()
-export class InMemoryCrawlQueue implements ICrawlQueue, OnModuleDestroy {
+export class InMemoryCrawlQueue
+  implements ICrawlQueue, OnApplicationBootstrap, OnModuleDestroy
+{
   private readonly logger = new Logger(InMemoryCrawlQueue.name);
   private readonly lanes = new Map<Marketplace, Lane>();
   private readonly cancelled = new Set<string>();
@@ -66,6 +73,53 @@ export class InMemoryCrawlQueue implements ICrawlQueue, OnModuleDestroy {
     private readonly runner: CrawlRunnerService,
     private readonly prisma: PrismaService,
   ) {}
+
+  /**
+   * Fail every run left QUEUED or RUNNING by a previous process.
+   *
+   * onModuleDestroy already does this on a GRACEFUL shutdown — but it is a lifecycle
+   * hook, so it never runs on the shutdowns that actually strand things: SIGKILL,
+   * `taskkill /F`, an OOM kill, a crash, a power cut. After one of those the database
+   * still says RUNNING and nothing in the process knows otherwise.
+   *
+   * That is not a cosmetic lie. Both trigger paths refuse a job with an outstanding
+   * run — CrawlJobsService.trigger throws "already has a run queued or in progress"
+   * and the cron logs "previous run still in progress" — so a single hard kill
+   * PERMANENTLY disables that job. No timeout expires it, no retry clears it, and
+   * the only cure is editing the database by hand. The dashboard's active-run count
+   * is wrong forever too.
+   *
+   * Sound because this queue is single-process and in-memory (see the class note):
+   * at bootstrap `lanes` is empty, so nothing can legitimately be in flight, and any
+   * such row is by definition a corpse. That reasoning is the ONLY thing making a
+   * blanket updateMany safe here — it would be actively destructive under a
+   * multi-instance deployment, where one booting instance would kill another's live
+   * runs. A durable queue (BullMQ) is the answer if this ever runs more than once;
+   * ICrawlQueue exists so that swap stays cheap.
+   *
+   * FAILED, not re-queued: the run may have written products before dying, so
+   * re-running it silently is not obviously safe, and a wrong status is worse than
+   * an honest failure. The error text says what happened so it does not read as a
+   * crawl fault.
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    const { count } = await this.prisma.crawlRun.updateMany({
+      where: { status: { in: [RunStatus.QUEUED, RunStatus.RUNNING] } },
+      data: {
+        status: RunStatus.FAILED,
+        finishedAt: new Date(),
+        error:
+          'Server stopped before this run finished — recovered at startup, not a crawl failure',
+      },
+    });
+
+    if (count > 0) {
+      this.logger.warn(
+        `Recovered ${count} run(s) left QUEUED/RUNNING by a previous process and ` +
+          `marked them FAILED. Their jobs can be triggered again.`,
+      );
+    }
+  }
 
   async enqueue(runId: string, marketplace: Marketplace): Promise<void> {
     if (this.shuttingDown) throw new Error('Queue is shutting down');

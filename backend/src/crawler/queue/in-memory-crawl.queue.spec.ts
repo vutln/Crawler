@@ -302,6 +302,93 @@ describe('InMemoryCrawlQueue', () => {
     });
   });
 
+  /**
+   * Recovery from a shutdown that skipped onModuleDestroy.
+   *
+   * onModuleDestroy handles the graceful case, but it is a lifecycle hook — it does
+   * not run for SIGKILL, `taskkill /F`, an OOM kill, a crash, or a power cut. Those
+   * leave rows saying RUNNING with no process behind them, and because BOTH trigger
+   * paths refuse a job that has an outstanding run, one hard kill disables that job
+   * permanently. Nothing expires it; the only other cure is editing the database.
+   */
+  describe('startup recovery', () => {
+    /** Typed so the deep assertions below are not reads off `any`. */
+    type RecoverArgs = {
+      where: { status: { in: RunStatus[] } };
+      data: { status: RunStatus; finishedAt: Date; error: string };
+    };
+    type RecoverMock = jest.Mock<Promise<{ count: number }>, [RecoverArgs]>;
+
+    function makeQueueWithPrisma(updateMany: RecoverMock) {
+      const runner = {
+        execute: () =>
+          Promise.resolve({
+            status: RunStatus.SUCCEEDED,
+            itemsFound: 0,
+            itemsNew: 0,
+            itemsUpdated: 0,
+          }),
+        cancel: () => true,
+      } as unknown as CrawlRunnerService;
+      const prisma = {
+        crawlRun: { update: () => Promise.resolve({}), updateMany },
+      } as unknown as PrismaService;
+      return new InMemoryCrawlQueue(runner, prisma);
+    }
+
+    it('fails runs left QUEUED or RUNNING by a previous process', async () => {
+      const updateMany = jest
+        .fn<Promise<{ count: number }>, [RecoverArgs]>()
+        .mockResolvedValue({ count: 3 });
+      const queue = makeQueueWithPrisma(updateMany);
+
+      await queue.onApplicationBootstrap();
+
+      expect(updateMany).toHaveBeenCalledTimes(1);
+      const arg = updateMany.mock.calls[0][0];
+
+      // Exactly the two states that block a job from being triggered again.
+      expect(arg.where.status.in).toEqual([
+        RunStatus.QUEUED,
+        RunStatus.RUNNING,
+      ]);
+      expect(arg.data.status).toBe(RunStatus.FAILED);
+      // Says WHY, so a recovered row does not read as a crawl fault.
+      expect(arg.data.error).toMatch(
+        /Server stopped before this run finished/i,
+      );
+      expect(arg.data.finishedAt).toBeInstanceOf(Date);
+    });
+
+    /**
+     * FAILED, not re-queued. A dead run may already have written products, so
+     * silently re-running it is not obviously safe — and a status that lies is worse
+     * than one that admits failure.
+     */
+    it('does not re-queue what it recovers', async () => {
+      const updateMany = jest
+        .fn<Promise<{ count: number }>, [RecoverArgs]>()
+        .mockResolvedValue({ count: 2 });
+      const queue = makeQueueWithPrisma(updateMany);
+
+      await queue.onApplicationBootstrap();
+      await settle();
+
+      expect(queue.size()).toBe(0);
+      expect(queue.isBusy()).toBe(false);
+    });
+
+    /** The overwhelmingly common case: a clean previous shutdown, nothing to do. */
+    it('is silent when there is nothing to recover', async () => {
+      const updateMany = jest
+        .fn<Promise<{ count: number }>, [RecoverArgs]>()
+        .mockResolvedValue({ count: 0 });
+      const queue = makeQueueWithPrisma(updateMany);
+
+      await expect(queue.onApplicationBootstrap()).resolves.toBeUndefined();
+    });
+  });
+
   describe('block cascade', () => {
     /**
      * THE REGRESSION FAN-OUT INTRODUCES.

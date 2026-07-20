@@ -1,3 +1,4 @@
+import type { ConfigService } from '@nestjs/config';
 import { Marketplace } from '../../generated/prisma/client';
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { AdapterRegistry } from '../adapters/adapter.registry';
@@ -48,7 +49,16 @@ describe('CrawlRunnerService.upsert', () => {
     } as unknown as PrismaService;
 
     const registry = {} as AdapterRegistry;
-    return { runner: new CrawlRunnerService(prisma, registry), captured };
+    // Only CRAWL_RUN_TIMEOUT_MS is read, and only by execute() — these upsert tests
+    // never reach the watchdog, so the fallback is all that matters here.
+    const config = {
+      get: (_k: string, fallback?: unknown) => fallback,
+    } as unknown as ConfigService;
+
+    return {
+      runner: new CrawlRunnerService(prisma, registry, config),
+      captured,
+    };
   }
 
   function record(over: Partial<ProductRecord> = {}): ProductRecord {

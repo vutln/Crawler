@@ -222,6 +222,53 @@ describe('BlockDetectorService', () => {
     ])('flags challenge page title: %s', (title) => {
       expect(detector.inspect({ title }).blocked).toBe(true);
     });
+
+    /**
+     * A challenge that carries a RETURN URL is a holding page.
+     *
+     * This exact URL came out of a real BLOCKED run. eBay bounced to it, and 3s
+     * later — untouched — the browser was back on the search page with 62 results.
+     * Classifying it as a refusal cost a full block: backoff step 12, a 900s hold,
+     * for a page that was about to hand over the data.
+     *
+     * `ru` is the site stating its own intent. A page that means to refuse you does
+     * not carry directions back to where you were going.
+     */
+    it('marks a challenge carrying a return URL as self-resolving', () => {
+      const signal = detector.inspect({
+        url:
+          'https://www.ebay.com/splashui/challenge?ap=1&appName=orch&ru=' +
+          'https%3A%2F%2Fwww.ebay.com%2Fsch%2Fi.html%3F_nkw%3Dharry%2520potter%2520shirt' +
+          '&iid=2f8f9e6e-0989-4dbf-a893-919b2585d2be',
+      });
+
+      expect(signal.blocked).toBe(true);
+      expect(signal.selfResolving).toBe(true);
+      expect(signal.reason).toMatch(/return URL/i);
+    });
+
+    /**
+     * THE LINE THAT MUST NOT MOVE. A CAPTCHA waits for a HUMAN, and no amount of
+     * waiting substitutes for one — even though it carries the same `ru` param.
+     */
+    it('never marks a CAPTCHA self-resolving, even with a return URL', () => {
+      const signal = detector.inspect({
+        url: 'https://www.ebay.com/splashui/captcha?ru=https%3A%2F%2Fwww.ebay.com%2Fsch',
+      });
+
+      expect(signal.blocked).toBe(true);
+      expect(signal.selfResolving).not.toBe(true);
+    });
+
+    /** No return URL means no stated intent to send us back — treat as a wall. */
+    it('does not mark a bare challenge URL self-resolving', () => {
+      const signal = detector.inspect({
+        url: 'https://www.ebay.com/splashui/challenge?ap=1',
+      });
+
+      expect(signal.blocked).toBe(true);
+      expect(signal.selfResolving).not.toBe(true);
+    });
   });
 
   /**

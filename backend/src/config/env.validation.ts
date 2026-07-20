@@ -102,6 +102,45 @@ export class EnvVars {
   CRAWL_MAX_BACKOFF_MS = 900_000;
 
   /**
+   * How many times navigate() may load a page again when the block it hit might
+   * not be a real wall. Total attempts are 1 + this.
+   *
+   * Applies to exactly two kinds of signal, both of which the detector marks
+   * explicitly: an AMBIGUOUS page (the marketplace error page, which is served for
+   * genuine 5xx blips as well as soft blocks) and a SELF-RESOLVING interstitial
+   * (a "checking your browser" page that hands control back on its own).
+   *
+   * It never applies to an explicit refusal — a CAPTCHA, a DataDome challenge, an
+   * automated-access notice. Those answered in words, and reloading them is a
+   * retry loop against a host that is already saying no.
+   */
+  @IsInt()
+  @Min(0)
+  @Max(5)
+  @Transform(({ value }) => parseInt(value as string, 10))
+  @IsOptional()
+  CRAWL_MAX_BLOCK_RELOADS = 2;
+
+  /**
+   * How long to let a self-resolving interstitial finish before reloading it.
+   *
+   * Some bot checks are a holding page: they run a JS check and then send the
+   * browser on to the page you asked for. Waiting costs no requests at all and is
+   * the politest possible response — we are doing what the site asked.
+   *
+   * Measured 2026-07-20, and worth knowing before raising this: Etsy's DataDome
+   * challenge did NOT self-resolve — static for 63s across 2 reloads — so it is
+   * NOT marked self-resolving and never reaches this wait. Raising this number
+   * only makes genuine walls slower to report.
+   */
+  @IsInt()
+  @Min(0)
+  @Max(120_000)
+  @Transform(({ value }) => parseInt(value as string, 10))
+  @IsOptional()
+  CRAWL_INTERSTITIAL_WAIT_MS = 20_000;
+
+  /**
    * Hard ceiling on a single run, after which it is aborted and marked FAILED.
    *
    * A watchdog, not a performance budget. Nothing else bounds a run: Selenium's

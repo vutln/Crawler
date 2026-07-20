@@ -1,9 +1,10 @@
 import { Inject, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { By, until, type WebDriver, type WebElement } from 'selenium-webdriver';
 import type { Marketplace } from '../../generated/prisma/client';
 import { BlockDetectorService, type BlockSignal } from '../politeness/block-detector.service';
 import { RobotsService } from '../politeness/robots.service';
-import { ThrottleService } from '../politeness/throttle.service';
+import { ThrottleService, sleep } from '../politeness/throttle.service';
 import { WebDriverFactory } from '../driver/webdriver.factory';
 import {
   BlockedError,
@@ -36,7 +37,16 @@ const MAX_IDLE_HOLD_MS = 15_000;
  * being "look again" and becomes a retry loop against a site that may be refusing
  * us, which is what deepens the throttle.
  */
-const MAX_AMBIGUOUS_RELOADS = 2;
+/**
+ * How often to re-check a holding page while waiting it out.
+ *
+ * Not configurable: it is a polling granularity, not a policy. The policy knobs
+ * are CRAWL_INTERSTITIAL_WAIT_MS (how long we are willing to wait) and
+ * CRAWL_MAX_BLOCK_RELOADS (how many times we try at all). Polling costs nothing —
+ * it reads the DOM already in the browser — so this only decides how quickly we
+ * notice the site has forwarded us.
+ */
+const INTERSTITIAL_POLL_MS = 2_000;
 
 /**
  * Robots gating, throttling, block detection and navigation.
@@ -66,6 +76,20 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
   @Inject(RobotsService) protected readonly robots!: RobotsService;
   @Inject(ThrottleService) protected readonly throttle!: ThrottleService;
   @Inject(BlockDetectorService) protected readonly blockDetector!: BlockDetectorService;
+  @Inject(ConfigService) protected readonly config!: ConfigService;
+
+  /**
+   * Read through getters, not fields: these properties are injected AFTER
+   * construction (see the note above), so a field initialiser would capture
+   * `undefined` from a config that does not exist yet.
+   */
+  private get maxBlockReloads(): number {
+    return this.config.get<number>('CRAWL_MAX_BLOCK_RELOADS', 2);
+  }
+
+  private get interstitialWaitMs(): number {
+    return this.config.get<number>('CRAWL_INTERSTITIAL_WAIT_MS', 20_000);
+  }
 
   constructor() {
     this.logger = new Logger(this.constructor.name);
@@ -122,40 +146,61 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
     let signal = await this.inspectPage(driver);
 
     /**
-     * Up to MAX_AMBIGUOUS_RELOADS reloads, and ONLY for a signal the detector
-     * marks ambiguous — so at most 1 + MAX_AMBIGUOUS_RELOADS loads in total.
+     * Up to CRAWL_MAX_BLOCK_RELOADS reloads, and ONLY for a signal the detector
+     * marks recoverable — so at most 1 + that many loads in total.
      *
-     * The marketplace error page ("Sorry! Something went wrong") is served both
-     * for genuine 5xx blips and as a soft block — the detector's own comment says
-     * it is "genuinely ambiguous", and one sample cannot tell them apart. We used
-     * to resolve that by always guessing "wall", paying 6 backoff steps (~2min)
-     * and failing the run on evidence that might be a hiccup. Looking again costs
-     * one request and settles it. Amazon has been observed serving this page on a
-     * cold hit and rendering normally on reload, which is the case this recovers.
+     * TWO kinds of signal qualify, and they are handled differently because they
+     * are asking for different things:
+     *
+     * AMBIGUOUS — the marketplace error page ("Sorry! Something went wrong"), which
+     * is served both for genuine 5xx blips and as a soft block. One sample cannot
+     * tell them apart, so the answer is to fetch it again. Amazon has been observed
+     * serving this on a cold hit and rendering normally on reload.
+     *
+     * SELF-RESOLVING — a "checking your browser" interstitial that runs a JS check
+     * and then forwards to the page we asked for. It has already told us what it
+     * is; the answer is to WAIT, which costs no request at all. Reloading one of
+     * these is actively counterproductive, since it restarts the check that was
+     * already running. Only after the wait expires do we reload.
      *
      * The boundary matters more than the count. An EXPLICIT refusal — CAPTCHA,
-     * "not a robot", DataDome, Distil — is never reloaded: the site answered in
-     * words, and asking again is a retry loop, which is the thing that deepens
-     * the throttle and the thing this codebase refuses to do. We also do not
-     * change anything about ourselves between attempts: same driver, same
-     * cookies, same headers, same identity. This disambiguates a page; it does not
-     * try to get a different answer to the same question. The loop condition keeps
-     * that honest — the moment a signal stops being ambiguous, reloading stops,
-     * whether it cleared or hardened into an explicit refusal.
+     * DataDome, an automated-access notice — is never waited on OR reloaded: the
+     * site answered in words, and asking again is a retry loop, which is the thing
+     * that deepens the throttle and the thing this codebase refuses to do. We also
+     * do not change anything about ourselves between attempts: same driver, same
+     * cookies, same headers, same identity. The loop condition keeps that honest —
+     * the moment a signal stops being recoverable, this stops, whether it cleared
+     * or hardened into an explicit refusal.
      *
-     * Costed like any other request: each pass goes through throttle.acquire(), so
-     * the per-host floor is paid again before every knock.
+     * Costed like any other request: each reload goes through throttle.acquire(),
+     * so the per-host floor is paid again before every knock. The WAIT is not
+     * costed, because it is not a request.
      */
     for (
       let reload = 1;
-      reload <= MAX_AMBIGUOUS_RELOADS && signal.blocked && signal.ambiguous;
+      reload <= this.maxBlockReloads &&
+      signal.blocked &&
+      (signal.ambiguous || signal.selfResolving);
       reload++
     ) {
       if (ctx.signal.aborted) throw new Error('Aborted');
 
+      // A holding page gets the wait it asked for BEFORE we spend a request on it.
+      if (signal.selfResolving) {
+        signal = await this.waitOutInterstitial(driver, url, signal);
+
+        // Stop unless the wait left us with something a reload could still help.
+        // Checking only `!signal.blocked` was a bug: an interstitial that hardened
+        // into a CAPTCHA mid-wait is blocked AND unrecoverable, so it fell through
+        // and got reloaded — the exact retry-against-an-explicit-refusal this
+        // whole design refuses to do.
+        const recoverable = signal.ambiguous || signal.selfResolving;
+        if (!signal.blocked || !recoverable) break;
+      }
+
       this.logger.warn(
-        `${url}: ${signal.reason} — ambiguous by nature, look ${reload + 1} of ` +
-          `${MAX_AMBIGUOUS_RELOADS + 1} before calling it a wall`,
+        `${url}: ${signal.reason} — look ${reload + 1} of ` +
+          `${this.maxBlockReloads + 1} before calling it a wall`,
       );
 
       await this.throttle.acquire(url, ctx.signal);
@@ -182,6 +227,47 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
     }
 
     this.throttle.recordSuccess(url);
+  }
+
+  /**
+   * Let a "checking your browser" interstitial finish on its own.
+   *
+   * Polls the page in place rather than sleeping blind, so the moment the site
+   * forwards us we carry on instead of waiting out the full window. No request is
+   * made here at all — the browser is simply given the time the page asked for,
+   * which is the politest available response to a holding page and the one a human
+   * visitor would give it.
+   *
+   * Returns the latest signal: cleared if it resolved, the original if it did not.
+   */
+  private async waitOutInterstitial(
+    driver: WebDriver,
+    url: string,
+    initial: BlockSignal,
+  ): Promise<BlockSignal> {
+    if (this.interstitialWaitMs <= 0) return initial;
+
+    this.logger.warn(
+      `${url}: ${initial.reason} — a holding page, waiting up to ` +
+        `${Math.round(this.interstitialWaitMs / 1000)}s for it to forward us`,
+    );
+
+    const deadline = Date.now() + this.interstitialWaitMs;
+    let signal = initial;
+
+    while (Date.now() < deadline) {
+      await sleep(Math.min(INTERSTITIAL_POLL_MS, deadline - Date.now()));
+      signal = await this.inspectPage(driver);
+
+      if (!signal.blocked) {
+        this.logger.log(`${url}: the interstitial forwarded us — no wall here`);
+        return signal;
+      }
+      // Hardened into something explicit while we waited: stop, do not reload.
+      if (!signal.selfResolving && !signal.ambiguous) return signal;
+    }
+
+    return signal;
   }
 
   /** driver.get with the throttle's failure bookkeeping. Caller must have acquired first. */

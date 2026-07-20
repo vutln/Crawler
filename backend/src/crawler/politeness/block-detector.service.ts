@@ -18,6 +18,26 @@ export interface BlockSignal {
    * Default false. A new signature is an explicit refusal unless proven otherwise.
    */
   ambiguous?: boolean;
+
+  /**
+   * True when the page is a HOLDING page that hands control back on its own — the
+   * "checking your browser" interstitial some anti-bot vendors show while they run
+   * a JS check, after which they redirect to the page originally requested.
+   *
+   * Distinct from `ambiguous`, and the difference is what the caller does about it.
+   * An ambiguous page cannot be classified, so the answer is to fetch it AGAIN.
+   * A self-resolving page has classified itself — it is telling us to wait — so the
+   * answer is to WAIT, which costs no request at all. Reloading one of these
+   * actually restarts whatever check was already in progress.
+   *
+   * Set it only where waiting has been OBSERVED to work. Etsy's DataDome challenge
+   * looks like a holding page and is not one: measured 2026-07-20 it sat unchanged
+   * for 63s across two reloads. Marking that self-resolving would buy nothing and
+   * make every Etsy failure a minute slower to report.
+   *
+   * Default false, same as `ambiguous`, and for the same reason.
+   */
+  selfResolving?: boolean;
 }
 
 @Injectable()
@@ -35,6 +55,7 @@ export class BlockDetectorService {
     pattern: RegExp;
     reason: string;
     ambiguous?: boolean;
+    selfResolving?: boolean;
   }> = [
     // Amazon
     {
@@ -59,13 +80,32 @@ export class BlockDetectorService {
     },
 
     // eBay
-    { pattern: /Pardon Our Interruption/i, reason: 'eBay/Distil interstitial' },
+    {
+      /**
+       * Distil/Imperva's holding page. It is worded as one ("...we need to make
+       * sure you're not a robot" / "you will be redirected"), runs a JS check, and
+       * sends the browser on to the requested URL when it passes. Waiting is what
+       * it asks for and costs no request, so it is self-resolving rather than a
+       * wall — but bounded by CRAWL_INTERSTITIAL_WAIT_MS, because it does not
+       * always pass.
+       */
+      pattern: /Pardon Our Interruption/i,
+      reason: 'eBay/Distil interstitial',
+      selfResolving: true,
+    },
+    // An actual CAPTCHA, not a holding page: it waits for a HUMAN, not a timer.
     { pattern: /ebay\.com\/splashui\/captcha/i, reason: 'eBay CAPTCHA' },
 
     // Etsy
     {
+      /**
+       * Etsy's own device challenge, which behaves like eBay's interstitial —
+       * it re-checks and continues. Distinct from the DataDome challenge below,
+       * which does NOT.
+       */
       pattern: /you'?re browsing Etsy from a device we don'?t recognize/i,
       reason: 'Etsy device challenge',
+      selfResolving: true,
     },
     {
       pattern: /Access is temporarily restricted/i,
@@ -172,10 +212,34 @@ export class BlockDetectorService {
 
     // Cheapest signal: a redirect to a challenge path needs no HTML at all.
     if (url && /\/(captcha|challenge|blocked|errors\/validate)/i.test(url)) {
+      /**
+       * A challenge carrying a RETURN URL is a holding page, not a wall.
+       *
+       * eBay bounces to /splashui/challenge?...&ru=<the page we asked for>, runs
+       * its check, and forwards to `ru` on its own. Measured 2026-07-20: landed on
+       * the challenge, and 3s later — untouched — it was back on the search page
+       * with 62 results.
+       *
+       * That parameter is the discriminator, and it is the site telling us its own
+       * intent: a page that means to refuse you does not carry directions back to
+       * where you were going. Treating these as refusals cost a full BLOCK — eBay
+       * went to backoff step 12, a 900s hold, for a page that resolved in three
+       * seconds.
+       *
+       * A CAPTCHA path is excluded even when it carries `ru`: that one waits for a
+       * human, and no amount of waiting substitutes for one.
+       */
+      const returnsTo = /[?&](ru|returnUrl|return_to)=/i.test(url);
+      const isCaptcha = /captcha/i.test(url);
+      const holding = returnsTo && !isCaptcha;
+
       return {
         blocked: true,
-        reason: 'Redirected to a challenge URL',
+        reason: holding
+          ? 'Challenge interstitial (carries a return URL)'
+          : 'Redirected to a challenge URL',
         evidence: url,
+        selfResolving: holding,
       };
     }
 
@@ -200,7 +264,8 @@ export class BlockDetectorService {
 
     // Title as well as body: the title is often the wall's clearest statement
     // about itself ("Access is temporarily restricted").
-    for (const { pattern, reason, ambiguous } of this.signatures) {
+    for (const { pattern, reason, ambiguous, selfResolving } of this
+      .signatures) {
       for (const haystack of [title, html]) {
         if (!haystack) continue;
         const match = pattern.exec(haystack);
@@ -210,6 +275,7 @@ export class BlockDetectorService {
             reason,
             evidence: excerpt(match[0]),
             ambiguous: ambiguous === true,
+            selfResolving: selfResolving === true,
           };
         }
       }

@@ -1,5 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable } from '@nestjs/common';
 import { By, until, type WebDriver, type WebElement } from 'selenium-webdriver';
 import { Marketplace } from '../../../generated/prisma/client';
 import {
@@ -65,8 +64,8 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
 
   private readonly origin = 'https://www.amazon.com';
 
-  /** Property injection for the same reason the base uses it — see its note there. */
-  @Inject(ConfigService) private readonly config!: ConfigService;
+  // ConfigService is inherited from SeleniumAdapterBase, which injects it for the
+  // block-reload knobs. Re-declaring it here shadowed the base's property.
 
   private readonly sel = {
     resultItem: ['div[data-asin][data-component-type="s-search-result"]'],

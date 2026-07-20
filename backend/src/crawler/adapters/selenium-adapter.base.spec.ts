@@ -29,6 +29,22 @@ const CAPTCHA_PAGE = `<html><head><title>Robot Check</title></head><body>
 const GOOD_PAGE = `<html><head><title>Amazon.com : keyboard</title></head><body>
   <div data-component-type="s-search-result">a real result</div></body></html>`;
 
+/**
+ * Distil/Imperva's holding page — a bot check that forwards you on by itself once
+ * its JS check passes. Self-resolving: the right response is to WAIT, not reload.
+ */
+const INTERSTITIAL_PAGE = `<html><head><title>Pardon Our Interruption</title></head>
+  <body><h1>Pardon Our Interruption</h1>
+  <p>As you were browsing something about your browser made us think you were a bot.</p>
+  </body></html>`;
+
+/**
+ * DataDome. Looks like a holding page and is NOT one — measured 2026-07-20 sitting
+ * unchanged for 63s across two reloads. Must be treated as an explicit refusal.
+ */
+const DATADOME_PAGE = `<html><head><title>etsy.com</title></head><body>
+  <script src="https://geo.captcha-delivery.com/captcha/"></script></body></html>`;
+
 class TestAdapter extends SeleniumAdapterBase {
   readonly marketplace = Marketplace.AMAZON;
   readonly name = 'test-adapter';
@@ -48,18 +64,36 @@ class TestAdapter extends SeleniumAdapterBase {
 describe('SeleniumAdapterBase.navigate — block handling', () => {
   const URL = 'https://www.amazon.com/s?k=keyboard';
 
-  /** Serves `pages` in order, one per driver.get(). Records how many loads happened. */
-  function makeDriver(pages: string[]): { driver: WebDriver; loads: () => number } {
+  /**
+   * Serves `pages` in order, one per driver.get(). Records how many loads happened.
+   *
+   * `morph` models a page that changes WITHOUT a new navigation — which is exactly
+   * what a self-resolving interstitial does when its JS check passes and it
+   * forwards the browser. Without it there is no way to tell "we waited and the
+   * page resolved" apart from "we re-fetched and got something else", and that
+   * distinction is the entire point of the interstitial path.
+   */
+  function makeDriver(
+    pages: string[],
+    morph?: { becomes: string; afterMs: number },
+  ): { driver: WebDriver; loads: () => number } {
     let i = 0;
     let current = '';
+    let loadedAt = 0;
+
+    const visible = (): string =>
+      morph && Date.now() - loadedAt >= morph.afterMs ? morph.becomes : current;
+
     const driver = {
       get: (_url: string) => {
         current = pages[Math.min(i, pages.length - 1)];
+        loadedAt = Date.now();
         i++;
         return Promise.resolve();
       },
-      getPageSource: () => Promise.resolve(current),
-      getTitle: () => Promise.resolve(/<title>([^<]*)</.exec(current)?.[1] ?? ''),
+      getPageSource: () => Promise.resolve(visible()),
+      getTitle: () =>
+        Promise.resolve(/<title>([^<]*)</.exec(visible())?.[1] ?? ''),
       getCurrentUrl: () => Promise.resolve(URL),
     } as unknown as WebDriver;
     return { driver, loads: () => i };
@@ -71,7 +105,15 @@ describe('SeleniumAdapterBase.navigate — block handling', () => {
     // keeps the suite fast while leaving the arithmetic observable.
     const config = {
       get: (key: string, fallback?: unknown) =>
-        ({ CRAWL_MIN_DELAY_MS: 1, CRAWL_MAX_BACKOFF_MS: 1000 })[key] ?? fallback,
+        ({
+          CRAWL_MIN_DELAY_MS: 1,
+          CRAWL_MAX_BACKOFF_MS: 1000,
+          CRAWL_MAX_BLOCK_RELOADS: 2,
+          // Explicit and tiny. Falling through to the real 20s default would make
+          // every self-resolving case sit in real time — the suite would take
+          // minutes and the failure would look like a hang, not an assertion.
+          CRAWL_INTERSTITIAL_WAIT_MS: 40,
+        })[key] ?? fallback,
     } as never;
 
     const throttle = new ThrottleService(config);
@@ -80,6 +122,9 @@ describe('SeleniumAdapterBase.navigate — block handling', () => {
     // Property injection: Nest would do this, and the properties are declared with
     // `!` so the compiler can't help us here. Mirrors what crawler.module wires.
     Object.assign(adapter, {
+      // The base reads its reload/wait knobs off this; without it navigate()
+      // throws on `this.config.get` before ever reaching the block logic.
+      config,
       drivers: {} as WebDriverFactory,
       robots: { isAllowed: () => Promise.resolve(true), crawlDelayMs: () => Promise.resolve(null) } as unknown as RobotsService,
       throttle,
@@ -194,5 +239,85 @@ describe('SeleniumAdapterBase.navigate — block handling', () => {
 
     await expect(adapter.go(driver, URL, aborted)).rejects.toThrow(/abort/i);
     expect(loads()).toBe(0);
+  });
+
+  /**
+   * Self-resolving interstitials: WAIT, do not reload.
+   *
+   * A "checking your browser" page is already telling us what it is, so the right
+   * response is the one it asked for — give it time. That costs no request, which
+   * is what makes it categorically different from the ambiguous case, where the
+   * only way to learn anything is to fetch again.
+   */
+  describe('self-resolving interstitials', () => {
+    /**
+     * THE POINT. The page forwards itself while we wait, so the SAME load becomes
+     * good — no second request is ever made. A reload here would have restarted the
+     * very check that was about to pass.
+     */
+    it('waits for a holding page to forward itself, without reloading', async () => {
+      const { adapter, throttle } = makeAdapter();
+      // One driver.get; the page's own content changes underneath us, exactly as a
+      // JS redirect does. Any second load would be the adapter's doing, not the page's.
+      const { driver, loads } = makeDriver([INTERSTITIAL_PAGE], {
+        becomes: GOOD_PAGE,
+        afterMs: 10,
+      });
+
+      await expect(adapter.go(driver, URL, ctx())).resolves.toBeUndefined();
+      expect(loads()).toBe(1); // waited, never re-fetched
+      expect(throttle.backoffMsFor(URL)).toBe(0); // no wall was ever recorded
+    });
+
+    /** If waiting does not clear it, THEN a reload is fair — bounded as ever. */
+    it('reloads once the wait expires, and still gives up at the bound', async () => {
+      const { adapter, throttle } = makeAdapter();
+      const { driver, loads } = makeDriver([
+        INTERSTITIAL_PAGE,
+        INTERSTITIAL_PAGE,
+        INTERSTITIAL_PAGE,
+      ]);
+
+      await expect(adapter.go(driver, URL, ctx())).rejects.toThrow(BlockedError);
+      // 1 + CRAWL_MAX_BLOCK_RELOADS, same ceiling the ambiguous path obeys.
+      expect(loads()).toBe(3);
+      expect(throttle.backoffMsFor(URL)).toBeGreaterThan(0);
+    });
+
+    /**
+     * THE ONE THAT KEEPS THIS HONEST.
+     *
+     * DataDome renders a page that looks like a holding page, and measurement says
+     * it is not one: unchanged for 63s across two reloads. Waiting on it buys
+     * nothing and makes every Etsy failure a minute slower to report, so it must be
+     * treated as the explicit refusal it is — one load, no wait, no reload.
+     */
+    it('never waits on a DataDome challenge — it does not self-resolve', async () => {
+      const { adapter } = makeAdapter();
+      const { driver, loads } = makeDriver([DATADOME_PAGE, GOOD_PAGE]);
+
+      const started = Date.now();
+      await expect(adapter.go(driver, URL, ctx())).rejects.toThrow(
+        /blocked the request/i,
+      );
+
+      expect(loads()).toBe(1);
+      // Would be >= CRAWL_INTERSTITIAL_WAIT_MS if it had been treated as a holding page.
+      expect(Date.now() - started).toBeLessThan(40);
+    });
+
+    /** Hardening mid-wait means the site answered: stop, do not spend the reload. */
+    it('stops immediately if the interstitial turns into a refusal while waiting', async () => {
+      const { adapter } = makeAdapter();
+      const { driver, loads } = makeDriver([INTERSTITIAL_PAGE], {
+        becomes: CAPTCHA_PAGE,
+        afterMs: 10,
+      });
+
+      await expect(adapter.go(driver, URL, ctx())).rejects.toThrow(
+        /blocked the request/i,
+      );
+      expect(loads()).toBe(1); // the remaining reloads were not spent
+    });
   });
 });

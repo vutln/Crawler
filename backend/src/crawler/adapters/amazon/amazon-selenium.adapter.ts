@@ -303,6 +303,24 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
     return false;
   }
 
+  /**
+   * ONE browser for the whole run, and records streamed as each page is parsed.
+   *
+   * The single browser is not a preference: the delivery address lives server-side
+   * against the session and `addressed` keys on the driver, so a driver per page
+   * would re-drive the widget every page against the most WAF-sensitive site here.
+   *
+   * The streaming half used to be impossible to have alongside it. `withDriver`
+   * returns `Promise<T>`, so nothing could `yield` from inside the lease — this
+   * method collected every page into an array and yielded afterwards. That looked
+   * like a style difference from eBay/Etsy and was a data-loss bug: `persist()`
+   * runs as records are yielded, so a run blocked on page 2 threw the lease's
+   * callback, discarded page 1's ~48 parsed records with the stack, and reported
+   * `itemsFound: 0` — a silent hole in that day's price series wearing a BLOCKED
+   * status that reads like a sufficient explanation.
+   *
+   * `withDriverIterable` keeps the session and restores the streaming.
+   */
   async *search(ctx: CrawlContext): AsyncIterable<ProductRecord> {
     const query = ctx.query;
 
@@ -310,46 +328,44 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
       throw new Error('Amazon search requires a query');
     }
 
-    const records = await this.drivers.withDriver(async (driver) => {
-      const collected: ProductRecord[] = [];
+    yield* this.drivers.withDriverIterable(
+      (driver) => this.searchIn(driver, query, ctx),
+      ctx.signal,
+    );
+  }
 
-      for (let page = 1; page <= ctx.maxPages; page++) {
-        if (ctx.signal.aborted || collected.length >= ctx.maxItems) {
-          break;
-        }
+  /** The page loop, given a browser. Yields each record as it is parsed. */
+  private async *searchIn(
+    driver: WebDriver,
+    query: string,
+    ctx: CrawlContext,
+  ): AsyncIterable<ProductRecord> {
+    let emitted = 0;
 
-        const url = `${this.origin}/s?k=${encodeURIComponent(query)}&page=${page}`;
+    for (let page = 1; page <= ctx.maxPages; page++) {
+      if (ctx.signal.aborted || emitted >= ctx.maxItems) return;
 
-        await this.navigate(driver, url, ctx);
+      const url = `${this.origin}/s?k=${encodeURIComponent(query)}&page=${page}`;
 
-        // AFTER the page is loaded, not before: the widget we need lives in this
-        // page's own nav bar. Once per browser, so only page 1 pays for it, and it
-        // reloads this url so the cards below are priced for the new address.
-        await this.ensureDeliveryAddress(driver, ctx, url);
+      await this.navigate(driver, url, ctx);
 
-        const pageRecords = await this.parseSearchPage(
-          driver,
-          `Amazon page ${page}`,
-        );
+      // AFTER the page is loaded, not before: the widget we need lives in this
+      // page's own nav bar. Once per browser, so only page 1 pays for it, and it
+      // reloads this url so the cards below are priced for the new address.
+      await this.ensureDeliveryAddress(driver, ctx, url);
 
-        if (pageRecords.length === 0) {
-          break;
-        }
+      const pageRecords = await this.parseSearchPage(
+        driver,
+        `Amazon page ${page}`,
+      );
 
-        for (const record of pageRecords) {
-          collected.push(record);
+      if (pageRecords.length === 0) return;
 
-          if (collected.length >= ctx.maxItems) {
-            break;
-          }
-        }
+      for (const record of pageRecords) {
+        if (emitted >= ctx.maxItems) return;
+        yield record;
+        emitted++;
       }
-
-      return collected;
-    });
-
-    for (const record of records) {
-      yield record;
     }
   }
 

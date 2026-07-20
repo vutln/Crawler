@@ -12,6 +12,7 @@ import {
   type MarketplaceAdapter,
   type ProductRecord,
 } from './adapter.interface';
+import type { StepRuntime } from './steps/step-runtime';
 
 /** A real "no results" page still carries nav and footer — hundreds of chars. */
 const EMPTY_BODY_THRESHOLD = 50;
@@ -107,7 +108,13 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
    * The only sanctioned way to load a page. Order matters: robots (don't fetch
    * what we're told not to), throttle (pace what we may), then block-check.
    */
-  protected async navigate(driver: WebDriver, url: string, ctx: CrawlContext): Promise<void> {
+  protected async navigate(
+    driver: WebDriver,
+    url: string,
+    ctx: CrawlContext,
+    /** `probe: true` = a page we are trying on spec; see the block branch below. */
+    opts?: { probe?: boolean },
+  ): Promise<void> {
     if (ctx.signal.aborted) throw new Error('Aborted');
 
     const allowed = await this.robots.isAllowed(url);
@@ -216,8 +223,27 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
 
     if (signal.blocked) {
       this.blockDetector.logIfBlocked(signal, url);
-      // recordBlock, not recordFailure: a wall costs several backoff steps.
-      this.throttle.recordBlock(url);
+
+      /**
+       * A PROBE's wall is not charged to the host.
+       *
+       * Everything else about a probe is normal — robots is obeyed, the throttle
+       * floor is paid, the block is detected and still throws. Only the backoff
+       * punishment is withheld, because a page we chose to try on spec is not
+       * evidence that the host walled our crawl.
+       *
+       * Without this, the caller's fallback cannot run at all. Throttle state is
+       * keyed by HOSTNAME, so a probe of amazon.com/ and the real crawl of
+       * amazon.com/s?k=… share one bucket: recordBlock charges BLOCK_STEPS = 6,
+       * i.e. 2000 × 2⁶ = 128s owed, and navigate()'s own cooldown bail then refuses
+       * the fallback outright ("is 128s into a cooldown"). The run would fail
+       * completely on exactly the intermittent WAF the fallback exists to survive.
+       */
+      if (!opts?.probe) {
+        // recordBlock, not recordFailure: a wall costs several backoff steps.
+        this.throttle.recordBlock(url);
+      }
+
       throw new BlockedError(
         `${this.marketplace} blocked the request: ${signal.reason}`,
         signal.evidence,
@@ -227,6 +253,123 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
     }
 
     this.throttle.recordSuccess(url);
+  }
+
+  /**
+   * The capability bundle handed to steps. See StepRuntime for why steps get this
+   * instead of dependency injection.
+   *
+   * Built per (driver, ctx) rather than once, because every method here needs both
+   * and threading them through each call would put the plumbing back in the steps.
+   */
+  protected runtime(driver: WebDriver, ctx: CrawlContext): StepRuntime {
+    return {
+      driver,
+      ctx,
+      logger: this.logger,
+      navigate: (url, opts) => this.navigate(driver, url, ctx, opts),
+      transition: (act, label) => this.transition(driver, ctx, act, label),
+      waitForAny: (selectors, timeoutMs) =>
+        this.waitForAny(driver, selectors, timeoutMs),
+      clickFirst: (selectors) => this.clickFirst(driver, selectors),
+      textOf: (scope, selectors) => this.textOf(scope, selectors),
+      attrOf: (scope, selectors, attribute) =>
+        this.attrOf(scope, selectors, attribute),
+    };
+  }
+
+  /**
+   * Account for a navigation the PAGE performs — Enter in a search box, a click on
+   * a next-page link.
+   *
+   * These are real requests that never reach navigate(), so without this they pay
+   * no throttle floor and a wall arriving through one is only noticed later, by
+   * diagnoseEmptyPage, with a much worse message.
+   *
+   * Deliberately NO reload loop, unlike navigate(). Re-submitting a form is not
+   * re-fetching a URL: it is asking the site the same question again after it may
+   * already have refused, which is the retry loop this codebase declines to build.
+   * A block here throws immediately and the caller decides.
+   */
+  protected async transition(
+    driver: WebDriver,
+    ctx: CrawlContext,
+    act: () => Promise<void>,
+    label: string,
+  ): Promise<void> {
+    if (ctx.signal.aborted) throw new Error('Aborted');
+
+    // Pace against where we ARE — the destination host is the same one, and we do
+    // not know the destination URL until after the act anyway.
+    const from = await driver.getCurrentUrl();
+    await this.throttle.acquire(from, ctx.signal);
+
+    await act();
+
+    const signal = await this.inspectPage(driver);
+    if (signal.blocked) {
+      this.blockDetector.logIfBlocked(signal, label);
+      const landedOn = await driver.getCurrentUrl();
+      this.throttle.recordBlock(landedOn);
+      throw new BlockedError(
+        `${this.marketplace} blocked the request: ${signal.reason}`,
+        signal.evidence,
+        this.throttle.owedBackoffMsFor(landedOn),
+      );
+    }
+
+    this.throttle.recordSuccess(from);
+  }
+
+  /** First selector with a clickable match. False when none can be clicked. */
+  protected async clickFirst(
+    driver: WebDriver,
+    selectors: string[],
+  ): Promise<boolean> {
+    for (const selector of selectors) {
+      for (const el of await driver.findElements(By.css(selector))) {
+        try {
+          await el.click();
+          return true;
+        } catch {
+          continue; // covered by another element, or detached mid-render
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Wait for result containers, then parse each one. Shared by every adapter.
+   *
+   * This body was byte-identical in all three adapters, comments included. Each
+   * still keeps its own `protected parseSearchPage(driver, context)` as a one-line
+   * delegate, because three fixture specs subclass to reach that name and the seam
+   * is worth more than the lines it saves.
+   */
+  protected async scrapeCards(
+    driver: WebDriver,
+    resultItem: string[],
+    parseCard: (el: WebElement) => Promise<ProductRecord | null>,
+    context: string,
+  ): Promise<ProductRecord[]> {
+    const rendered = await this.waitForAny(driver, resultItem);
+
+    if (!rendered) {
+      // Returning [] here unconditionally is what let an Etsy JS challenge report
+      // SUCCEEDED / 0 items. diagnoseEmptyPage decides whether "no cards" means an
+      // empty result set, DOM drift, or a wall — and throws when it is a wall.
+      await this.diagnoseEmptyPage(driver, context);
+      return [];
+    }
+
+    const elements = await driver.findElements(By.css(resultItem.join(', ')));
+    const out: ProductRecord[] = [];
+    for (const el of elements) {
+      const record = await parseCard(el);
+      if (record) out.push(record);
+    }
+    return out;
   }
 
   /**

@@ -11,6 +11,7 @@ import {
 } from '../../normalize';
 import { SeleniumAdapterBase } from '../selenium-adapter.base';
 import type { CrawlContext, ProductRecord } from '../adapter.interface';
+import { nextPage } from '../steps/next-page.step';
 
 /**
  * Etsy via Selenium.
@@ -65,27 +66,56 @@ export class EtsySeleniumAdapter extends SeleniumAdapterBase {
   /** Same list as sel.reviews; kept separate because reviewCountText walks ALL matches. */
   private static readonly REVIEW_CANDIDATES = ['span.wt-text-body-01', 'p.wt-text-caption span'];
 
+  /** One browser for the whole run, streaming. See EbaySeleniumAdapter.search. */
   async *search(ctx: CrawlContext): AsyncIterable<ProductRecord> {
     if (!ctx.query) throw new Error('Etsy search requires a query');
 
-    let emitted = 0;
+    yield* this.drivers.withDriverIterable(
+      (driver) => this.searchIn(driver, ctx.query!, ctx),
+      ctx.signal,
+    );
+  }
 
+  private async *searchIn(
+    driver: WebDriver,
+    query: string,
+    ctx: CrawlContext,
+  ): AsyncIterable<ProductRecord> {
+    const rt = this.runtime(driver, ctx);
+    const searchUrl = (page: number) =>
+      `${this.origin}/search?q=${encodeURIComponent(query)}&page=${page}`;
+
+    /**
+     * No homepage probe and no typed search here, unlike Amazon.
+     *
+     * Etsy is the one marketplace whose anti-bot this project has NOT found a way
+     * through: measured 2026-07-20, its DataDome challenge sat unchanged for 63s
+     * across two reloads. Until that is solved, adding requests to the session is
+     * spending against a host that is already refusing us, for a benefit nothing
+     * has demonstrated. URL entry is the cheapest thing that works.
+     */
+    await rt.navigate(searchUrl(1));
+
+    let emitted = 0;
     for (let page = 1; page <= ctx.maxPages; page++) {
       if (ctx.signal.aborted || emitted >= ctx.maxItems) return;
 
-      const url = `${this.origin}/search?q=${encodeURIComponent(ctx.query)}&page=${page}`;
-
-      const records = await this.drivers.withDriver(async (driver) => {
-        await this.navigate(driver, url, ctx);
-        return this.parseSearchPage(driver, `Etsy page ${page}`);
-      });
-
+      const records = await this.parseSearchPage(driver, `Etsy page ${page}`);
       if (records.length === 0) return;
 
       for (const record of records) {
         if (emitted >= ctx.maxItems) return;
         yield record;
         emitted++;
+      }
+
+      if (page < ctx.maxPages) {
+        const advanced = await nextPage(
+          rt,
+          { mode: 'url', url: searchUrl },
+          page + 1,
+        );
+        if (!advanced) return;
       }
     }
   }
@@ -95,24 +125,14 @@ export class EtsySeleniumAdapter extends SeleniumAdapterBase {
    * Split out from search() so tests can point a driver at a frozen HTML
    * fixture and exercise the real parser offline.
    */
-  protected async parseSearchPage(driver: WebDriver, context = 'Etsy'): Promise<ProductRecord[]> {
-    const rendered = await this.waitForAny(driver, this.sel.resultItem);
-    if (!rendered) {
-      // Throws BlockedError if this is a wall rather than a genuinely empty
-      // result set. Returning [] here unconditionally is what let an Etsy
-      // JS challenge report SUCCEEDED / 0 items.
-      await this.diagnoseEmptyPage(driver, context);
-      return [];
-    }
-
-    const elements = await driver.findElements(By.css(this.sel.resultItem.join(', ')));
-    const out: ProductRecord[] = [];
-
-    for (const el of elements) {
-      const record = await this.parseCard(el);
-      if (record) out.push(record);
-    }
-    return out;
+  protected parseSearchPage(driver: WebDriver, context = 'Etsy'): Promise<ProductRecord[]> {
+    // Body lives in the base — it was byte-identical across all three adapters.
+    return this.scrapeCards(
+      driver,
+      this.sel.resultItem,
+      (el) => this.parseCard(el),
+      context,
+    );
   }
 
   private async parseCard(el: WebElement): Promise<ProductRecord | null> {

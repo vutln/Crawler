@@ -32,6 +32,15 @@ const SEARCH_PAGE = `<html><head><title>Amazon.com : keyboard</title></head><bod
 const HOME_URL = 'https://www.amazon.com/';
 const SEARCH_URL = 'https://www.amazon.com/s?k=keyboard&page=1';
 
+/**
+ * Selenium's control keys (Key.RETURN and friends) occupy the Unicode private-use
+ * area. Built from char codes rather than written as a literal class: invisible
+ * characters in source are unreviewable, and lint rejects them outright.
+ */
+const CONTROL_KEY = new RegExp(
+  `^[${String.fromCharCode(0xe000)}-${String.fromCharCode(0xf8ff)}]+$`,
+);
+
 const BODY_TEXT =
   'Skip to main content Deliver to Holtsville 00501 All Departments ' +
   'No results for keyboard. Try checking your spelling. Back to top ' +
@@ -47,15 +56,50 @@ describe('AmazonSeleniumAdapter — delivery address', () => {
    * distinguishes waiting from not waiting.
    */
   function makeDriver(
-    opts: { widget?: boolean; label?: string; rendersLate?: boolean } = {},
+    opts: {
+      widget?: boolean;
+      label?: string;
+      rendersLate?: boolean;
+      /**
+       * Model Amazon's real behaviour: applying the ZIP lands server-side, but the
+       * nav label does NOT re-render for it. The label keeps reading the OLD
+       * location until the next page load. Measured 2026-07-20 — read in place it
+       * still said "Vietnam"; the very next load said "Holtsville 00501".
+       */
+      staleLabel?: boolean;
+    } = {},
   ) {
     const hasWidget = opts.widget ?? true;
     const loads: string[] = [];
     let typed = '';
     let pageLoads = 0;
     let waited = false;
+    let loadsAtType = -1;
 
-    const label = opts.label ?? 'Holtsville 00501';
+    const freshLabel = opts.label ?? 'Holtsville 00501';
+    /** What the nav bar reads right now. */
+    const currentLabel = (): string => {
+      if (!opts.staleLabel) return freshLabel;
+      // Only a load AFTER the ZIP was typed refreshes it.
+      return loadsAtType >= 0 && pageLoads > loadsAtType
+        ? freshLabel
+        : 'Vietnam';
+    };
+
+    /**
+     * An ORDERED log of everything the adapter did to the browser.
+     *
+     * A load-count or URL-shape assertion cannot police step ordering:
+     * `[SEARCH, SEARCH]` is produced equally by "load, set address, reload, parse"
+     * (correct) and by "load, reload, parse, set address" or "load, reload, parse"
+     * with the address silently failing in between (both wrong). All three have the
+     * same URL list. Recording WHEN the typing and parsing happened relative to the
+     * loads is what makes the ordering claim testable — and this is exactly what a
+     * step-composition refactor is able to reshuffle without changing any count.
+     */
+    const events: string[] = [];
+    const urlLabel = (url: string): string =>
+      url === HOME_URL ? 'HOME' : url === SEARCH_URL ? 'SEARCH' : url;
 
     /** Is the nav present for a look happening right now? */
     const navVisible = (): boolean => {
@@ -65,16 +109,42 @@ describe('AmazonSeleniumAdapter — delivery address', () => {
     };
 
     const element = (text: string) => ({
-      click: () => Promise.resolve(),
+      click: () => {
+        events.push('click');
+        return Promise.resolve();
+      },
       clear: () => Promise.resolve(),
       sendKeys: (v: string) => {
-        typed = v;
+        /**
+         * Selenium control keys live in the Unicode private-use area (Key.RETURN
+         * is U+E006), and they arrive through the same sendKeys as real text. A
+         * naive `typed = v` therefore has the Enter keystroke overwrite the value
+         * that was just typed — which looks exactly like "the ZIP was never
+         * entered" while the log says it was.
+         */
+        const isControlKey = CONTROL_KEY.test(v);
+        if (!isControlKey) {
+          typed = v;
+          loadsAtType = pageLoads;
+        }
+        events.push(`type:${isControlKey ? '<ENTER>' : v}`);
+
+        // Submitting a search navigates. The fake has to model that or
+        // getCurrentUrl still reports the page we typed ON, and every URL
+        // assertion downstream reads as a failed search.
+        if (isControlKey) {
+          loads.push(SEARCH_URL);
+          events.push(`get:${urlLabel(SEARCH_URL)}`);
+          pageLoads++;
+          waited = false;
+        }
         return Promise.resolve();
       },
       getText: () => Promise.resolve(text),
       getAttribute: () => Promise.resolve(text),
       // textOf(body, ...) reaches through the body element for the label.
-      findElement: () => elementPromise(label),
+      // Read lazily: the label the nav shows depends on WHEN it is asked.
+      findElement: () => elementPromise(currentLabel()),
     });
 
     /**
@@ -91,6 +161,7 @@ describe('AmazonSeleniumAdapter — delivery address', () => {
     const driver = {
       get: (url: string) => {
         loads.push(url);
+        events.push(`get:${urlLabel(url)}`);
         pageLoads++;
         // A fresh document: whatever the last page rendered does not carry over.
         waited = false;
@@ -101,12 +172,17 @@ describe('AmazonSeleniumAdapter — delivery address', () => {
       getCurrentUrl: () => Promise.resolve(loads[loads.length - 1] ?? ''),
       // The nav-bar widget follows navVisible(); result containers never match,
       // so search() reads zero cards and stops after page 1.
-      findElements: (by: { value?: string }) =>
-        Promise.resolve(
-          navVisible() && /GLUX|glow|nav-global/.test(by.value ?? '')
+      findElements: (by: { value?: string }) => {
+        const selector = by.value ?? '';
+        // The adapter only ever asks for result cards from parseSearchPage, so
+        // this is the honest marker for "the page was read".
+        if (/s-search-result|data-asin/.test(selector)) events.push('parse');
+        return Promise.resolve(
+          navVisible() && /GLUX|glow|nav-global/.test(selector)
             ? [element('')]
             : [],
-        ),
+        );
+      },
       // The <body> scope. Its own findElement yields the location label, which is
       // how textOf(body, locationLabel) reads the address back.
       findElement: () => elementPromise(BODY_TEXT),
@@ -133,6 +209,7 @@ describe('AmazonSeleniumAdapter — delivery address', () => {
     return {
       driver,
       loads,
+      events,
       typed: () => typed,
       totalLoads: () => pageLoads,
       homepageLoadCount,
@@ -140,24 +217,60 @@ describe('AmazonSeleniumAdapter — delivery address', () => {
     };
   }
 
-  function makeAdapter(zip: string, driver: WebDriver) {
+  /**
+   * @param drivers one per `withDriver` call, in order. Passing more than one is
+   * how the per-BROWSER guarantee gets tested: the adapter's `addressed` WeakSet
+   * keys on the driver object, so distinct drivers must each be addressed.
+   *
+   * The homepage entry is OFF here by default, and that is a scoping decision
+   * rather than a claim about the product. This file is about what happens to the
+   * address; entering the session is its own step with its own spec
+   * (steps.spec.ts), and mixing them would make every assertion below depend on
+   * which door the crawl came in. The homepage path gets one dedicated test at the
+   * bottom, asserting the thing that actually matters — that the address is still
+   * applied when we arrive that way.
+   */
+  function makeAdapter(zip: string, ...drivers: WebDriver[]) {
+    return buildAdapter(zip, { homepage: false }, drivers);
+  }
+
+  /** Same, with the session opening on the homepage. One test uses this. */
+  function makeAdapterViaHomepage(zip: string, ...drivers: WebDriver[]) {
+    return buildAdapter(zip, { homepage: true }, drivers);
+  }
+
+  function buildAdapter(
+    zip: string,
+    opts: { homepage: boolean },
+    drivers: WebDriver[],
+  ) {
     const config = {
       get: (key: string, fallback?: unknown) =>
         ({
           AMAZON_DELIVERY_ZIP: zip,
+          AMAZON_ENTRY_HOMEPAGE: opts.homepage ? 'true' : 'false',
           CRAWL_MIN_DELAY_MS: 1,
           CRAWL_MAX_BACKOFF_MS: 1000,
         })[key] ?? fallback,
     } as never;
 
     const adapter = new AmazonSeleniumAdapter();
+    const logged: string[] = [];
+    let leased = 0;
 
     // Property injection — what crawler.module wires at runtime. The `!` on these
     // properties means the compiler cannot catch a missing one here.
     Object.assign(adapter, {
       config,
       drivers: {
-        withDriver: <T>(fn: (d: WebDriver) => Promise<T>) => fn(driver),
+        // Hand out the drivers in order, one per lease, then stay on the last —
+        // so a test passing two drivers observes two distinct browsers.
+        withDriver: <T>(fn: (d: WebDriver) => Promise<T>) =>
+          fn(drivers[Math.min(leased++, drivers.length - 1)]),
+        // search() leases through the streaming variant now. Delegating rather
+        // than reimplementing keeps the driver-picking identical for both.
+        withDriverIterable: <T>(fn: (d: WebDriver) => AsyncIterable<T>) =>
+          fn(drivers[Math.min(leased++, drivers.length - 1)]),
       } as unknown as WebDriverFactory,
       robots: {
         isAllowed: () => Promise.resolve(true),
@@ -165,9 +278,20 @@ describe('AmazonSeleniumAdapter — delivery address', () => {
       } as unknown as RobotsService,
       throttle: new ThrottleService(config),
       blockDetector: new BlockDetectorService(),
+      // Captured so a test can tell the SUCCESS path from the warn path. The
+      // address flow is best-effort and only logs, so the log IS the outcome.
+      logger: {
+        log: (m: string) => logged.push(`log:${m}`),
+        warn: (m: string) => logged.push(`warn:${m}`),
+        error: (m: string) => logged.push(`error:${m}`),
+        debug: () => {},
+        verbose: () => {},
+      },
     });
 
-    return adapter;
+    return Object.assign(adapter, {
+      __logged: logged,
+    });
   }
 
   function ctx(maxPages = 1): CrawlContext {
@@ -212,9 +336,14 @@ describe('AmazonSeleniumAdapter — delivery address', () => {
    * working fine: "No location widget after 15s ... Delivery address not set",
    * followed by a perfectly good 108-product run with no US prices.
    *
-   * The nav is global. Never go to the homepage for it.
+   * SCOPE NOTE, because this test's claim narrowed when session entry was added.
+   * The crawl may now open on the homepage deliberately — enterSession tries it and
+   * falls back when it is walled, which is a decision made with the measurement
+   * above in hand. What must still never happen is the ADDRESS FLOW going there on
+   * its own initiative: it works on whatever page the crawl already wanted, because
+   * the nav is global. That is what this pins, and it is the part that broke.
    */
-  it('never loads the homepage — the widget is on the page we already wanted', async () => {
+  it('the address flow never navigates to the homepage on its own', async () => {
     const { driver, homepageLoadCount, typed } = makeDriver();
     await drain(makeAdapter('00501', driver), ctx());
 
@@ -227,13 +356,58 @@ describe('AmazonSeleniumAdapter — delivery address', () => {
    * rendered against the OLD location, so its prices are the wrong ones. Applying
    * and then parsing what is already on screen collects exactly the price-less rows
    * this feature exists to fix — the reload is not optional.
+   *
+   * Asserted as an interleaved EVENT LOG, not a URL list. `[SEARCH, SEARCH]` is
+   * produced identically by the correct order and by at least two broken ones
+   * (parse-before-reload; address silently failing between two loads), so a URL
+   * assertion cannot police this. The sequence below can — and step composition is
+   * precisely the kind of change that can reshuffle it while every count stays put.
    */
-  it('reloads the search page after applying, before parsing it', async () => {
-    const { driver, loads, typed } = makeDriver();
+  it('applies the address, reloads, and only THEN parses', async () => {
+    const { driver, events, typed } = makeDriver();
     await drain(makeAdapter('00501', driver), ctx());
 
-    expect(loads).toEqual([SEARCH_URL, SEARCH_URL]);
+    const shape = events.filter((e) => e !== 'click');
+
+    expect(shape).toEqual([
+      'get:SEARCH', // 1. land on the page we actually want
+      'type:00501', // 2. set the address from ITS nav bar
+      'get:SEARCH', // 3. reload so prices re-render for that address
+      'parse', // 4. only now read the cards
+    ]);
     expect(typed()).toBe('00501');
+
+    // Stated twice on purpose: the ordering above is the claim, and these two are
+    // the specific inversions that would silently defeat it.
+    expect(shape.indexOf('type:00501')).toBeLessThan(
+      shape.lastIndexOf('get:SEARCH'),
+    );
+    expect(shape.lastIndexOf('get:SEARCH')).toBeLessThan(
+      shape.indexOf('parse'),
+    );
+  });
+
+  /**
+   * The mirror of the test below, and the one PRODUCT_URLS depends on.
+   *
+   * `addressed` keys on the DRIVER object, and fetchProduct takes a fresh driver
+   * per URL — so every one of them must be addressed independently. Store that
+   * state anywhere coarser (a field on the adapter, which is a Nest singleton, or
+   * anything run-scoped) and a 40-URL Amazon job addresses URL 1 and skips the
+   * other 39, yielding 39 rows of `price: null, currency: XXX` under a green
+   * SUCCEEDED run — exactly the symptom this whole feature exists to remove.
+   */
+  it('addresses every browser: two fetches on two drivers both set the ZIP', async () => {
+    const first = makeDriver();
+    const second = makeDriver();
+    const adapter = makeAdapter('00501', first.driver, second.driver);
+    const url = 'https://www.amazon.com/dp/B0B5HZLTLL';
+
+    await adapter.fetchProduct(url, ctx());
+    await adapter.fetchProduct(url, ctx());
+
+    expect(first.typed()).toBe('00501');
+    expect(second.typed()).toBe('00501'); // NOT skipped as "already addressed"
   });
 
   /**
@@ -284,6 +458,35 @@ describe('AmazonSeleniumAdapter — delivery address', () => {
   });
 
   /**
+   * The verification must read the label on a FRESH page, not in place.
+   *
+   * Amazon applies the ZIP server-side against the session, but the nav label does
+   * not re-render for it — measured 2026-07-20, it still read "Vietnam" immediately
+   * after applying and "Holtsville 00501" on the very next load. An in-place
+   * read-back therefore reports failure on every success, which is precisely the
+   * "it doesn't choose anything" symptom, while the address WAS in fact set.
+   *
+   * This fails open (it only logs), so nothing else in the suite would notice.
+   * The log IS the outcome here, which is why it is what gets asserted.
+   */
+  it('reads the label back only after a reload, so a success is reported as one', async () => {
+    const { driver } = makeDriver({ staleLabel: true });
+    const adapter = makeAdapter('00501', driver);
+
+    await drain(adapter, ctx());
+
+    const success = adapter.__logged.filter((l) =>
+      /^log:Delivery address set to 00501/.test(l),
+    );
+    const misreported = adapter.__logged.filter((l) =>
+      /^warn:Delivery address may not have applied/.test(l),
+    );
+
+    expect(success).toHaveLength(1);
+    expect(misreported).toHaveLength(0);
+  });
+
+  /**
    * THE BUG THIS FLOW SHIPPED WITH.
    *
    * Amazon injects the nav with JS — its own markup carries
@@ -303,5 +506,41 @@ describe('AmazonSeleniumAdapter — delivery address', () => {
 
     // Reaching sendKeys at all means the gate survived the late render.
     expect(typed()).toBe('00501');
+  });
+
+  /**
+   * The other door. Every test above runs with homepage entry off to isolate the
+   * address; this one turns it on and checks the address survives that path.
+   *
+   * The nav is global, so arriving via the homepage is fine for the widget — what
+   * would NOT be fine is the address quietly being skipped because the recipe
+   * changed which page it happens on. Entry itself (probe, fallback, non-block
+   * errors) is covered by steps.spec.ts; this is purely the handoff.
+   */
+  it('still sets the address when the session opens on the homepage', async () => {
+    const { driver, homepageLoadCount, events } = makeDriver();
+    const adapter = makeAdapterViaHomepage('00501', driver);
+    await drain(adapter, ctx());
+
+    expect(homepageLoadCount()).toBeGreaterThan(0); // we did come in that way
+
+    // NOT typed(): on this path the search query is typed after the ZIP, so the
+    // last-value-wins helper reports "keyboard". The event log is the precise
+    // record, and it shows both in the order they happened.
+    // The whole session, in order: arrive, set the address, search, then read.
+    expect(events.filter((e) => e !== 'click')).toEqual([
+      'get:HOME',
+      'type:00501',
+      'get:HOME', // the address verification reload
+      'type:keyboard',
+      'type:<ENTER>',
+      'get:SEARCH',
+      'parse',
+    ]);
+
+    // And the search actually landed where it claimed — no fallback needed.
+    expect(adapter.__logged).not.toContain(
+      expect.stringMatching(/landed somewhere unexpected/),
+    );
   });
 });

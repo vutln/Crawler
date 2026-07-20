@@ -14,6 +14,42 @@ import { SeleniumAdapterBase } from '../selenium-adapter.base';
 import type { CrawlContext, ProductRecord } from '../adapter.interface';
 
 /**
+ * How long to wait for the nav to render before believing the location widget
+ * really is absent.
+ *
+ * Amazon injects the nav with JS (its own `nav-progressive-*` classes), and
+ * driver.get() resolves before that runs — so this is a rendering wait, not a
+ * network one. Matches the timeout the zip input already used; the gate simply
+ * did not have one.
+ */
+const WIDGET_TIMEOUT_MS = 15_000;
+
+// There is deliberately no homepage-retry constant here any more. The address flow
+// used to load https://www.amazon.com/ up to twice looking for the nav widget, and
+// that page is the most aggressively challenged on the site — measured serving a
+// 2KB AWS WAF page while a search for the same session returned 1.7MB of results.
+// The widget is global, so the flow now uses whichever page the crawl already
+// wanted, and the retry has nothing left to do.
+
+/**
+ * Amazon pads the location label with zero-width marks — the value read back was
+ * literally "Holtsville 00501" plus a ZERO WIDTH NON-JOINER, so a plain
+ * includes() against the ZIP fails on a label that is in fact correct.
+ *
+ * Built from char codes rather than written as a regex literal: invisible
+ * characters in source are unreviewable, and lint rejects them outright.
+ */
+const ZERO_WIDTH = new RegExp(
+  // Alternation, not a character class: ZWJ (200D) inside a class can combine with
+  // its neighbours into a single grapheme, which lint flags as misleading and which
+  // would not match the marks individually anyway.
+  [0x200b, 0x200c, 0x200d, 0xfeff].map((c) => String.fromCharCode(c)).join('|'),
+  'g',
+);
+
+const stripZeroWidth = (s: string): string => s.replace(ZERO_WIDTH, '');
+
+/**
  * Amazon via Selenium.
  *
  * Be realistic about this one: Amazon runs the most aggressive anti-bot stack of
@@ -143,6 +179,8 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
   private async ensureDeliveryAddress(
     driver: WebDriver,
     ctx: CrawlContext,
+    /** The page we are already on; reloaded after applying so it re-prices. */
+    currentUrl: string,
   ): Promise<void> {
     const zip = this.deliveryZip;
     if (!zip || this.addressed.has(driver)) return;
@@ -152,14 +190,36 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
     // already be refusing us, which is how a soft block becomes a hard one.
     this.addressed.add(driver);
 
-    // Through navigate(), so the homepage is robots-gated, throttled and
-    // block-checked exactly like a search page. This request is not special.
-    await this.navigate(driver, `${this.origin}/`, ctx);
-
     try {
-      if (!(await this.clickFirst(driver, this.sel.locationLink))) {
+      /**
+       * Drive the widget on the page we are ALREADY on — never the homepage.
+       *
+       * The nav bar is global, so the search page carries the same location widget
+       * as the homepage. Measured 2026-07-20, same browser, alternating loads:
+       *
+       *   homepage     nav=0  waf=Y  len=  1,995   <- AWS WAF challenge
+       *   search page  nav=1  waf=n  len=1,701,704
+       *
+       * The homepage is the single most-challenged page on the site, and the
+       * previous version went there deliberately, twice, before every crawl — so
+       * the address silently failed to apply on exactly the runs where the search
+       * itself was working fine. Using the page we needed anyway removes both the
+       * extra requests and the most likely point of failure.
+       *
+       * Still waits rather than looking once: the nav is progressively rendered
+       * (Amazon's own `nav-progressive-*` classes), so it exists a beat after
+       * driver.get() resolves.
+       */
+      if (
+        !(await this.waitForAny(
+          driver,
+          this.sel.locationLink,
+          WIDGET_TIMEOUT_MS,
+        )) ||
+        !(await this.clickFirst(driver, this.sel.locationLink))
+      ) {
         this.logger.warn(
-          `Delivery address not set to ${zip}: no location widget on the page. ` +
+          `Delivery address not set to ${zip}: no location widget on ${currentUrl}. ` +
             `Prices will be missing for items that don't ship to this egress.`,
         );
         return;
@@ -174,22 +234,41 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
       await input.sendKeys(zip);
 
       await this.clickFirst(driver, this.sel.zipApply);
-      // Amazon re-renders the nav after applying; without this the read-back below
-      // races the old DOM and reports the previous location.
       await driver.sleep(2_000);
       await this.clickFirst(driver, this.sel.zipConfirm);
       await driver.sleep(1_000);
 
-      // Read back what Amazon says, rather than assuming the clicks took. The
-      // widget shows a city or "Holtsville 00501" — anything not naming our ZIP
-      // means it didn't apply, and callers deserve to know which.
+      /**
+       * Reload the page we are on. This does two jobs at once.
+       *
+       * PRICES: the page currently in the browser was rendered before the address
+       * existed, so its prices are the ones we came for and are still wrong. It has
+       * to be fetched again either way.
+       *
+       * VERIFICATION: measured 2026-07-20, Apply lands server-side against the
+       * session but the nav label does NOT re-render for it. Immediately after
+       * applying, the widget still read "Vietnam"; the very next page load read
+       * "Holtsville 00501". So an in-place read-back could only ever report the
+       * location we arrived with — it called every success a failure, which is
+       * exactly the "it doesn't choose anything" symptom, while the address was in
+       * fact set.
+       *
+       * Reloading the search page rather than the homepage means the reload we
+       * already owe for prices is also the one that tells us the truth.
+       */
+      await this.navigate(driver, currentUrl, ctx);
+
       const body = await driver.findElement(By.css('body'));
       const shown = (await this.textOf(body, this.sel.locationLabel))?.replace(
         /\s+/g,
         ' ',
       );
 
-      if (shown?.includes(zip)) {
+      // Amazon pads the label with a zero-width non-joiner — the observed value was
+      // literally "Holtsville 00501" — so strip zero-width marks before
+      // comparing. Escapes, not the characters themselves: invisible regex contents
+      // are unreviewable and lint rejects them outright.
+      if (stripZeroWidth(shown ?? '').includes(zip)) {
         this.logger.log(
           `Delivery address set to ${zip} ("${shown}") — US pricing`,
         );
@@ -233,8 +312,6 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
     }
 
     const records = await this.drivers.withDriver(async (driver) => {
-      await this.ensureDeliveryAddress(driver, ctx);
-
       const collected: ProductRecord[] = [];
 
       for (let page = 1; page <= ctx.maxPages; page++) {
@@ -245,6 +322,11 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
         const url = `${this.origin}/s?k=${encodeURIComponent(query)}&page=${page}`;
 
         await this.navigate(driver, url, ctx);
+
+        // AFTER the page is loaded, not before: the widget we need lives in this
+        // page's own nav bar. Once per browser, so only page 1 pays for it, and it
+        // reloads this url so the cards below are priced for the new address.
+        await this.ensureDeliveryAddress(driver, ctx, url);
 
         const pageRecords = await this.parseSearchPage(
           driver,
@@ -346,9 +428,10 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
     if (!asin) throw new Error(`Could not extract ASIN from ${url}`);
 
     return this.drivers.withDriver(async (driver) => {
-      // Detail pages hide the price for the same reason search cards do.
-      await this.ensureDeliveryAddress(driver, ctx);
       await this.navigate(driver, url, ctx);
+      // Detail pages hide the price for the same reason search cards do, and carry
+      // the same nav widget — so set the address here, then reload for the price.
+      await this.ensureDeliveryAddress(driver, ctx, url);
 
       const rendered = await this.waitForAny(driver, [
         '#productTitle',

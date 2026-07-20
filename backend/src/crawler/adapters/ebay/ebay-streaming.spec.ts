@@ -72,7 +72,10 @@ describe('EbaySeleniumAdapter — streaming baseline', () => {
     return { driver, loads: () => loads };
   }
 
+  let leases = 0;
+
   function makeAdapter(driver: WebDriver) {
+    leases = 0;
     const config = {
       get: (key: string, fallback?: unknown) =>
         ({ CRAWL_MIN_DELAY_MS: 1, CRAWL_MAX_BACKOFF_MS: 1000 })[key] ??
@@ -84,6 +87,11 @@ describe('EbaySeleniumAdapter — streaming baseline', () => {
       config,
       drivers: {
         withDriver: <T>(fn: (d: WebDriver) => Promise<T>) => fn(driver),
+        // eBay now leases ONE browser for the whole run and streams through it.
+        withDriverIterable: <T>(fn: (d: WebDriver) => AsyncIterable<T>) => {
+          leases++;
+          return fn(driver);
+        },
       } as unknown as WebDriverFactory,
       robots: {
         isAllowed: () => Promise.resolve(true),
@@ -151,5 +159,56 @@ describe('EbaySeleniumAdapter — streaming baseline', () => {
     // 1 means the first record surfaced after page 1 and before page 2 was asked
     // for. Buffering would make this equal maxPages.
     expect(loadsWhenFirstRecordArrived).toBe(1);
+  });
+
+  /**
+   * ONE session for the whole run — the half of the port that is not about
+   * streaming.
+   *
+   * eBay used to lease a browser PER PAGE, so nothing carried between pages: no
+   * cookies earned, no referrer chain, every page arriving cold. The old comment
+   * justified it by memory and detached DOM, which is a sound instinct that is
+   * mis-sized here — a run is bounded by maxPages (2 in production), and a
+   * 20-keyword sweep is 20 separate runs, so this is 2-3 loads per browser rather
+   * than 40. Against that, each launch costs ~1-2s of Chrome startup and is
+   * another chance to leak chrome.exe on Windows.
+   */
+  it('uses one browser for every page, not one per page', async () => {
+    const { driver, loads } = makeDrivers(0);
+    const adapter = makeAdapter(driver);
+
+    for await (const record of adapter.search(ctx(3))) void record;
+
+    expect(leases).toBe(1);
+    expect(loads()).toBeGreaterThan(1); // it really did visit several pages
+  });
+
+  /**
+   * `_ipg=60` is a cross-adapter CONTRACT, pinned by api-paging.spec.ts: the API
+   * adapter requests 60 per page so "page 2" means the same items whether or not
+   * EBAY_APP_ID is set. It has no keyboard equivalent, which is why eBay
+   * paginates by URL rather than typing — losing it would silently redefine a
+   * keyword's dataset the moment an API credential appeared, and api-paging.spec
+   * would keep passing while it happened.
+   */
+  it('keeps _ipg=60 on every page it requests', async () => {
+    const requested: string[] = [];
+    const { driver } = makeDrivers(0);
+    const spied = {
+      ...driver,
+      get: (url: string) => {
+        requested.push(url);
+        return (driver as unknown as { get: (u: string) => Promise<void> }).get(
+          url,
+        );
+      },
+    } as unknown as WebDriver;
+
+    for await (const record of makeAdapter(spied).search(ctx(2))) void record;
+
+    expect(requested.length).toBeGreaterThan(1);
+    for (const url of requested) {
+      expect(url).toContain('_ipg=60');
+    }
   });
 });

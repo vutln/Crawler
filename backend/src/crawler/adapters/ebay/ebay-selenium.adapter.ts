@@ -10,6 +10,7 @@ import {
 } from '../../normalize';
 import { SeleniumAdapterBase } from '../selenium-adapter.base';
 import type { CrawlContext, ProductRecord } from '../adapter.interface';
+import { nextPage } from '../steps/next-page.step';
 
 /**
  * eBay via Selenium.
@@ -54,31 +55,72 @@ export class EbaySeleniumAdapter extends SeleniumAdapterBase {
     nextPage: ['a.pagination__next[href]', 'a[type="next"][href]'],
   };
 
+  /**
+   * ONE browser for the whole run, streaming as each page is parsed.
+   *
+   * This used to take a driver PER PAGE, with a comment reasoning that a long
+   * crawl holding a browser open accumulates memory and detached DOM. That
+   * instinct is sound in general and mis-sized here, and the numbers are worth
+   * recording since the old comment had none: a run is bounded by `maxPages`
+   * (2 in production), not by the sweep — 20 keywords is 20 separate runs, so
+   * the choice is 2-3 page loads per browser versus 1, not 40 versus 1. Against
+   * that, Chrome startup is ~1-2s of pure process churn per launch, and every
+   * launch is another chance to leak chrome.exe on Windows.
+   *
+   * What settles it is that the session is the point: cookies and any preferences
+   * earned on page 1 now carry to page 2, which is the whole reason a person's
+   * browsing looks different from a scraper's.
+   */
   async *search(ctx: CrawlContext): AsyncIterable<ProductRecord> {
     if (!ctx.query) throw new Error('eBay search requires a query');
 
-    let emitted = 0;
+    yield* this.drivers.withDriverIterable(
+      (driver) => this.searchIn(driver, ctx.query!, ctx),
+      ctx.signal,
+    );
+  }
 
+  private async *searchIn(
+    driver: WebDriver,
+    query: string,
+    ctx: CrawlContext,
+  ): AsyncIterable<ProductRecord> {
+    const rt = this.runtime(driver, ctx);
+
+    /**
+     * `_ipg=60` is a cross-adapter CONTRACT, not a preference — api-paging.spec.ts
+     * pins EbayApiAdapter.PAGE_SIZE to 60 so that "page 2" means the same set of
+     * items whether or not EBAY_APP_ID is set. It has no keyboard equivalent,
+     * which is why eBay paginates by URL and does not type into the search box.
+     */
+    const searchUrl = (page: number) =>
+      `${this.origin}/sch/i.html?_nkw=${encodeURIComponent(query)}` +
+      `&_pgn=${page}&_ipg=60`;
+
+    // No homepage probe: eBay's results page is reliable, and every extra request
+    // to a host that walls this egress is a cost with no measured benefit yet.
+    await rt.navigate(searchUrl(1));
+
+    let emitted = 0;
     for (let page = 1; page <= ctx.maxPages; page++) {
       if (ctx.signal.aborted || emitted >= ctx.maxItems) return;
 
-      const url =
-        `${this.origin}/sch/i.html?_nkw=${encodeURIComponent(ctx.query)}` +
-        `&_pgn=${page}&_ipg=60`;
-
-      // One driver per page, not one per run: a long crawl holding a browser open
-      // accumulates memory and detached DOM, and a crash mid-run leaks it.
-      const records = await this.drivers.withDriver(async (driver) => {
-        await this.navigate(driver, url, ctx);
-        return this.parseSearchPage(driver, `eBay page ${page}`);
-      });
-
+      const records = await this.parseSearchPage(driver, `eBay page ${page}`);
       if (records.length === 0) return;
 
       for (const record of records) {
         if (emitted >= ctx.maxItems) return;
         yield record;
         emitted++;
+      }
+
+      if (page < ctx.maxPages) {
+        const advanced = await nextPage(
+          rt,
+          { mode: 'url', url: searchUrl },
+          page + 1,
+        );
+        if (!advanced) return;
       }
     }
   }
@@ -90,24 +132,16 @@ export class EbaySeleniumAdapter extends SeleniumAdapterBase {
    * and exercise the real parser without touching live eBay. Everything below
    * this line is pure DOM -> ProductRecord and knows nothing about navigation.
    */
-  protected async parseSearchPage(driver: WebDriver, context = 'eBay'): Promise<ProductRecord[]> {
-    const rendered = await this.waitForAny(driver, this.sel.resultItem);
-    if (!rendered) {
-      // Throws BlockedError if this is a wall rather than a genuinely empty
-      // result set. Returning [] here unconditionally is what let an Etsy
-      // JS challenge report SUCCEEDED / 0 items.
-      await this.diagnoseEmptyPage(driver, context);
-      return [];
-    }
-
-    const elements = await driver.findElements(By.css(this.sel.resultItem.join(', ')));
-    const out: ProductRecord[] = [];
-
-    for (const el of elements) {
-      const record = await this.parseCard(el);
-      if (record) out.push(record);
-    }
-    return out;
+  protected parseSearchPage(driver: WebDriver, context = 'eBay'): Promise<ProductRecord[]> {
+    // Body lives in the base — it was byte-identical across all three adapters,
+    // comments included. This stays a protected method because two fixture specs
+    // subclass to reach it, and that seam is worth more than the lines it saves.
+    return this.scrapeCards(
+      driver,
+      this.sel.resultItem,
+      (el) => this.parseCard(el),
+      context,
+    );
   }
 
   /** Returns null for non-product rows (ads, "results matching fewer words" separators). */

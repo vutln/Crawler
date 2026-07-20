@@ -143,8 +143,10 @@ export class SchedulerService implements OnModuleInit {
         ? await this.fanOut(job, trigger)
         : [await this.createSingleRun(job.id, trigger)];
 
+    // The marketplace is the queue's lane key, so every run of this job lands in
+    // one lane and is serialized there, while other marketplaces run alongside.
     for (const runId of runIds) {
-      await this.queue.enqueue(runId);
+      await this.queue.enqueue(runId, job.marketplace);
     }
     return runIds;
   }

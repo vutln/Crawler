@@ -1,30 +1,52 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
-import { RunStatus } from '../../generated/prisma/client';
+import { RunStatus, type Marketplace } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CrawlRunnerService } from '../pipeline/crawl-runner.service';
 import { sleep } from '../politeness/throttle.service';
 import type { ICrawlQueue } from './crawl-queue.interface';
 
 /**
- * Longest the queue will hold for one host's cooldown before giving up and just
- * letting the remaining runs fail fast.
+ * Longest a LANE will hold for its own host's cooldown before giving up and
+ * letting its remaining runs fail fast.
  *
- * A cap exists because this queue is a single lane: waiting out Amazon also stalls
- * eBay and Etsy. 5 minutes absorbs the common case whole — a first wall costs 6
- * backoff steps, ~128s at the default floor — while bounding the damage when a
- * host is deep into a repeat cooldown (which reaches the 15-minute ceiling).
+ * This is the full backoff ceiling (CRAWL_MAX_BACKOFF_MS), not a fraction of it,
+ * and that is the whole point of lanes. It used to be 5 minutes because the queue
+ * was one lane and waiting out Amazon also stalled eBay and Etsy — the cap bought
+ * the other two sites their turn, at the cost of stampeding the rest of Amazon's
+ * batch into a wall that was still up. Now a cooldown costs only its own
+ * marketplace, so there is no longer anything to trade away: wait the real number.
  *
- * If this cap starts being hit, the real fix is per-marketplace lanes, not a
- * bigger number: then Amazon's cooldown costs Amazon nothing but time.
+ * Still capped rather than unbounded, because cooldownMs comes from the throttle
+ * and a bug there should cost one lane an idle quarter-hour, not the process.
  */
-const MAX_QUEUE_COOLDOWN_MS = 5 * 60_000;
+const MAX_LANE_COOLDOWN_MS = 15 * 60_000;
+
+/** One marketplace's serialized queue. Lanes are independent by construction. */
+interface Lane {
+  readonly marketplace: Marketplace;
+  readonly pending: string[];
+  active: string | null;
+  draining: boolean;
+}
 
 /**
- * Single-process FIFO queue with concurrency 1.
+ * Single-process FIFO queue, serialized PER MARKETPLACE and concurrent across them.
  *
- * Concurrency is deliberately 1: the bottleneck is politeness, not CPU. Running
- * crawls in parallel just means hitting the same domain twice as fast, which is
- * precisely what gets a collector blocked.
+ * Concurrency within a lane is deliberately 1: the bottleneck is politeness, not
+ * CPU, and running two crawls of the same site at once just means hitting that
+ * domain twice as fast — precisely what gets a collector blocked.
+ *
+ * Concurrency ACROSS lanes is the point. Amazon walling costs Amazon a cooldown
+ * and costs eBay and Etsy nothing, because they are different hosts and the
+ * throttle is already keyed by host. Before this, one Amazon wall could hold the
+ * only lane for minutes while eBay's whole day sat behind it.
+ *
+ * Not threads. Every lane is an async loop on the one Node thread, which is all
+ * this workload needs — a crawl is almost entirely waiting on a network or a
+ * browser, so a thread would spend its life parked on await. The real parallelism
+ * lives in Chrome, one OS process per driver, bounded by SELENIUM_MAX_DRIVERS —
+ * which must be >= the number of marketplaces or lanes will queue on drivers
+ * instead of running.
  *
  * Known limitation, accepted by design: queued runs do not survive a restart.
  * onModuleDestroy marks orphans FAILED rather than leaving them RUNNING forever
@@ -34,12 +56,10 @@ const MAX_QUEUE_COOLDOWN_MS = 5 * 60_000;
 @Injectable()
 export class InMemoryCrawlQueue implements ICrawlQueue, OnModuleDestroy {
   private readonly logger = new Logger(InMemoryCrawlQueue.name);
-  private readonly pending: string[] = [];
+  private readonly lanes = new Map<Marketplace, Lane>();
   private readonly cancelled = new Set<string>();
-  private active: string | null = null;
-  private draining = false;
   private shuttingDown = false;
-  /** Aborts a cooldown wait so shutdown isn't held hostage by one — see coolDown(). */
+  /** Aborts every lane's cooldown wait so shutdown isn't held hostage — see coolDown(). */
   private readonly shutdown = new AbortController();
 
   constructor(
@@ -47,53 +67,80 @@ export class InMemoryCrawlQueue implements ICrawlQueue, OnModuleDestroy {
     private readonly prisma: PrismaService,
   ) {}
 
-  async enqueue(runId: string): Promise<void> {
+  async enqueue(runId: string, marketplace: Marketplace): Promise<void> {
     if (this.shuttingDown) throw new Error('Queue is shutting down');
-    this.pending.push(runId);
-    this.logger.log(`Enqueued ${runId} (depth: ${this.pending.length})`);
+
+    const lane = this.laneFor(marketplace);
+    lane.pending.push(runId);
+    this.logger.log(
+      `Enqueued ${runId} on ${marketplace} (lane depth: ${lane.pending.length}, ` +
+        `total: ${this.size()})`,
+    );
+
     // Intentionally not awaited: enqueue must return so the HTTP request can
-    // respond immediately with a QUEUED run. The drain loop owns the work.
-    void this.drain();
+    // respond immediately with a QUEUED run. The lane's drain loop owns the work.
+    void this.drain(lane);
   }
 
   async cancel(runId: string): Promise<boolean> {
-    if (this.active === runId) return this.runner.cancel(runId);
+    for (const lane of this.lanes.values()) {
+      if (lane.active === runId) return this.runner.cancel(runId);
 
-    const index = this.pending.indexOf(runId);
-    if (index === -1) return false;
+      const index = lane.pending.indexOf(runId);
+      if (index === -1) continue;
 
-    this.pending.splice(index, 1);
-    this.cancelled.add(runId);
-    await this.prisma.crawlRun.update({
-      where: { id: runId },
-      data: { status: RunStatus.CANCELLED, finishedAt: new Date() },
-    });
-    return true;
+      lane.pending.splice(index, 1);
+      this.cancelled.add(runId);
+      await this.prisma.crawlRun.update({
+        where: { id: runId },
+        data: { status: RunStatus.CANCELLED, finishedAt: new Date() },
+      });
+      return true;
+    }
+    return false;
   }
 
+  /** Queued across every lane. */
   size(): number {
-    return this.pending.length;
+    let total = 0;
+    for (const lane of this.lanes.values()) total += lane.pending.length;
+    return total;
   }
 
+  /** True while ANY lane has a run in flight. */
   isBusy(): boolean {
-    return this.active !== null;
+    for (const lane of this.lanes.values()) if (lane.active) return true;
+    return false;
   }
 
-  private async drain(): Promise<void> {
-    if (this.draining) return; // one loop only — re-entrancy would break serialization
-    this.draining = true;
+  private laneFor(marketplace: Marketplace): Lane {
+    let lane = this.lanes.get(marketplace);
+    if (!lane) {
+      // Created on first use rather than seeded from the enum: a marketplace with
+      // no jobs should cost nothing, and this cannot go stale when the enum grows.
+      lane = { marketplace, pending: [], active: null, draining: false };
+      this.lanes.set(marketplace, lane);
+    }
+    return lane;
+  }
+
+  private async drain(lane: Lane): Promise<void> {
+    // One loop PER LANE. Re-entrancy would break serialization within the lane,
+    // which is the guarantee that keeps us from hammering a single host.
+    if (lane.draining) return;
+    lane.draining = true;
 
     try {
-      while (this.pending.length > 0 && !this.shuttingDown) {
-        const runId = this.pending.shift()!;
+      while (lane.pending.length > 0 && !this.shuttingDown) {
+        const runId = lane.pending.shift()!;
         if (this.cancelled.delete(runId)) continue;
 
-        this.active = runId;
+        lane.active = runId;
         try {
           const outcome = await this.runner.execute(runId);
 
           /**
-           * Wait out a wall instead of stampeding the rest of the batch through it.
+           * Wait out a wall instead of stampeding the rest of THIS LANE through it.
            *
            * This exists because of fan-out. A wall costs the host ~128s of backoff,
            * during which navigate() refuses to knock and fails in MILLISECONDS —
@@ -103,33 +150,40 @@ export class InMemoryCrawlQueue implements ICrawlQueue, OnModuleDestroy {
            * marketplace's data, destroyed by a single wall.
            *
            * Not a retry: the blocked run stays BLOCKED and is not re-run. This only
-           * decides when the NEXT run is allowed to knock, and it never shortens
-           * the cooldown — the host is owed exactly as long either way.
+           * decides when the next run IN THIS LANE is allowed to knock, and it never
+           * shortens the cooldown — the host is owed exactly as long either way.
+           *
+           * Other lanes keep running throughout. That is the whole reason the wait
+           * can now be the full cooldown instead of a compromise.
            */
           if (outcome.status === RunStatus.BLOCKED && outcome.cooldownMs) {
-            await this.coolDown(outcome.cooldownMs);
+            await this.coolDown(lane, outcome.cooldownMs);
           }
         } catch (err) {
           // execute() records its own failures; this only catches a runner bug.
           // Swallowing here is essential — one bad run must not kill the loop
-          // and strand every queued run behind it.
-          this.logger.error(`Unhandled error draining ${runId}: ${(err as Error).message}`);
+          // and strand every queued run behind it. Scoped to one lane either way.
+          this.logger.error(
+            `Unhandled error draining ${runId} on ${lane.marketplace}: ` +
+              `${(err as Error).message}`,
+          );
         } finally {
-          this.active = null;
+          lane.active = null;
         }
       }
     } finally {
-      this.draining = false;
+      lane.draining = false;
     }
   }
 
-  private async coolDown(cooldownMs: number): Promise<void> {
-    if (this.pending.length === 0 || this.shuttingDown) return;
+  private async coolDown(lane: Lane, cooldownMs: number): Promise<void> {
+    if (lane.pending.length === 0 || this.shuttingDown) return;
 
-    const waitMs = Math.min(cooldownMs, MAX_QUEUE_COOLDOWN_MS);
+    const waitMs = Math.min(cooldownMs, MAX_LANE_COOLDOWN_MS);
     this.logger.warn(
-      `Host walled — holding the queue ${Math.round(waitMs / 1000)}s before the next run ` +
-        `(${this.pending.length} still queued). Knocking now would just fail them all.`,
+      `${lane.marketplace} walled — holding that lane ${Math.round(waitMs / 1000)}s before ` +
+        `its next run (${lane.pending.length} still queued for it). Other marketplaces ` +
+        `are unaffected.`,
     );
 
     try {
@@ -141,12 +195,19 @@ export class InMemoryCrawlQueue implements ICrawlQueue, OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     this.shuttingDown = true;
-    // Release any cooldown wait immediately: without this, shutdown would block
-    // for up to MAX_QUEUE_COOLDOWN_MS behind a sleeping drain loop.
+    // Release every lane's cooldown wait immediately: without this, shutdown would
+    // block for up to MAX_LANE_COOLDOWN_MS behind a sleeping drain loop.
     this.shutdown.abort();
-    if (this.active) this.runner.cancel(this.active);
 
-    const orphans = [this.active, ...this.pending].filter(Boolean) as string[];
+    const orphans: string[] = [];
+    for (const lane of this.lanes.values()) {
+      if (lane.active) {
+        this.runner.cancel(lane.active);
+        orphans.push(lane.active);
+      }
+      orphans.push(...lane.pending);
+    }
+
     if (orphans.length === 0) return;
 
     this.logger.warn(`Shutting down with ${orphans.length} unfinished run(s); marking FAILED`);

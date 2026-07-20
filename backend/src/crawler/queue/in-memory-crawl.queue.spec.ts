@@ -1,4 +1,4 @@
-import { RunStatus } from '../../generated/prisma/client';
+import { Marketplace, RunStatus } from '../../generated/prisma/client';
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { CrawlRunnerService, RunOutcome } from '../pipeline/crawl-runner.service';
 import { sleep } from '../politeness/throttle.service';
@@ -19,47 +19,78 @@ jest.mock('../politeness/throttle.service', () => ({
 
 const sleepMock = sleep as jest.MockedFunction<typeof sleep>;
 
+const AMAZON = Marketplace.AMAZON;
+const EBAY = Marketplace.EBAY;
+const ETSY = Marketplace.ETSY;
+
 /**
- * The queue's job is to drain runs one at a time without letting one bad run take
- * the batch down with it. Fan-out made that sharper: a sweep queues N runs against
- * ONE host, so anything that fails them in bulk destroys a whole day of that
- * marketplace's data.
+ * The queue drains runs one at a time PER MARKETPLACE, and marketplaces
+ * concurrently. Fan-out made the first half matter: a sweep queues N runs against
+ * ONE host, so anything that fails them in bulk destroys a day of that
+ * marketplace's data. Lanes made the second half matter: before them, one Amazon
+ * wall held the only lane and eBay's whole day waited behind it.
  */
 describe('InMemoryCrawlQueue', () => {
-  beforeEach(() => sleepMock.mockClear());
+  beforeEach(() => {
+    sleepMock.mockClear();
+    sleepMock.mockResolvedValue(undefined);
+  });
 
   /** Cooldowns the queue actually waited, in ms. */
   const slept = (): number[] => sleepMock.mock.calls.map((c) => c[0]);
 
-  function makeQueue(outcomes: Record<string, Partial<RunOutcome>> = {}): {
-    queue: InMemoryCrawlQueue;
-    executed: string[];
-  } {
+  function makeQueue(
+    outcomes: Record<string, Partial<RunOutcome>> = {},
+    /**
+     * Run ids whose execute() hangs until released — for observing concurrency.
+     * Optional-valued: a lookup miss is `undefined`, and typing it otherwise makes
+     * the guard below look dead to the compiler.
+     */
+    hold: Record<string, Promise<void> | undefined> = {},
+  ): { queue: InMemoryCrawlQueue; executed: string[]; cancelled: string[] } {
     const executed: string[] = [];
+    const cancelled: string[] = [];
 
     const runner = {
-      execute: (runId: string): Promise<RunOutcome> => {
+      execute: async (runId: string): Promise<RunOutcome> => {
         executed.push(runId);
-        return Promise.resolve({
+        if (hold[runId]) await hold[runId];
+        return {
           status: RunStatus.SUCCEEDED,
           itemsFound: 1,
           itemsNew: 1,
           itemsUpdated: 0,
           ...outcomes[runId],
-        });
+        };
       },
-      cancel: () => true,
+      cancel: (runId: string) => {
+        cancelled.push(runId);
+        return true;
+      },
     } as unknown as CrawlRunnerService;
 
     const prisma = {
       crawlRun: { update: () => Promise.resolve({}), updateMany: () => Promise.resolve({}) },
     } as unknown as PrismaService;
 
-    return { queue: new InMemoryCrawlQueue(runner, prisma), executed };
+    return {
+      queue: new InMemoryCrawlQueue(runner, prisma),
+      executed,
+      cancelled,
+    };
   }
 
-  /** Lets the fire-and-forget drain loop finish before assertions. */
+  /** Lets the fire-and-forget drain loops finish before assertions. */
   const settle = () => new Promise((r) => setTimeout(r, 10));
+
+  /** A promise plus its resolver, for holding a run or a cooldown open. */
+  function deferred(): { promise: Promise<void>; release: () => void } {
+    let release!: () => void;
+    const promise = new Promise<void>((r) => {
+      release = r;
+    });
+    return { promise, release };
+  }
 
   /**
    * NOTE: the enqueues below are `void`, never `await`ed, and that is load-bearing.
@@ -73,17 +104,17 @@ describe('InMemoryCrawlQueue', () => {
    * for entirely the wrong reason.
    */
 
-  it('drains queued runs in FIFO order', async () => {
+  it('drains a marketplace’s runs in FIFO order', async () => {
     const { queue, executed } = makeQueue();
-    void queue.enqueue('a');
-    void queue.enqueue('b');
-    void queue.enqueue('c');
+    void queue.enqueue('a', AMAZON);
+    void queue.enqueue('b', AMAZON);
+    void queue.enqueue('c', AMAZON);
     await settle();
 
     expect(executed).toEqual(['a', 'b', 'c']);
   });
 
-  it('keeps draining after a run throws — one bad run cannot strand the queue', async () => {
+  it('keeps draining after a run throws — one bad run cannot strand the lane', async () => {
     const executed: string[] = [];
     const runner = {
       execute: (runId: string) => {
@@ -98,11 +129,177 @@ describe('InMemoryCrawlQueue', () => {
     } as unknown as PrismaService;
     const queue = new InMemoryCrawlQueue(runner, prisma);
 
-    void queue.enqueue('boom');
-    void queue.enqueue('after');
+    void queue.enqueue('boom', AMAZON);
+    void queue.enqueue('after', AMAZON);
     await settle();
 
     expect(executed).toEqual(['boom', 'after']);
+  });
+
+  /**
+   * THE REASON LANES EXIST.
+   *
+   * Verified by mutation, not by assertion: collapsing laneFor() to a single shared
+   * key reproduces the old queue exactly, and these fail against it —
+   *
+   *   - runs different marketplaces concurrently
+   *   - a wall on one marketplace does not delay another
+   *   - counts queued runs across every lane
+   *   - (block cascade) does not hold when only another marketplace has runs queued
+   *
+   * The rest of this block passes either way, and is here as a regression guard on
+   * the refactor rather than as evidence of it: serialization WITHIN a lane is the
+   * politeness property lanes must not break, and cancel/shutdown had to grow from
+   * "the one active run" to "search every lane" without losing anything.
+   */
+  describe('lane isolation', () => {
+    /** A slow Amazon run must not stop eBay from starting. */
+    it('runs different marketplaces concurrently', async () => {
+      const amazonRun = deferred();
+      const { queue, executed } = makeQueue({}, { 'amz-1': amazonRun.promise });
+
+      void queue.enqueue('amz-1', AMAZON);
+      void queue.enqueue('ebay-1', EBAY);
+      void queue.enqueue('etsy-1', ETSY);
+      await settle();
+
+      // amz-1 is still in flight, yet the other two have already run.
+      expect(executed).toEqual(['amz-1', 'ebay-1', 'etsy-1']);
+      expect(queue.isBusy()).toBe(true);
+
+      amazonRun.release();
+      await settle();
+    });
+
+    /** Within a lane, serialization still holds — that is the politeness guarantee. */
+    it('still serializes within one marketplace', async () => {
+      const first = deferred();
+      const { queue, executed } = makeQueue({}, { 'amz-1': first.promise });
+
+      void queue.enqueue('amz-1', AMAZON);
+      void queue.enqueue('amz-2', AMAZON);
+      await settle();
+
+      // amz-2 must NOT have started while amz-1 is in flight.
+      expect(executed).toEqual(['amz-1']);
+
+      first.release();
+      await settle();
+      expect(executed).toEqual(['amz-1', 'amz-2']);
+    });
+
+    /**
+     * THE HEADLINE. Amazon walls, its lane sits out the cooldown, and eBay runs
+     * during it. On a single-lane queue eBay would be stuck behind that sleep.
+     */
+    it('a wall on one marketplace does not delay another', async () => {
+      const cooldown = deferred();
+      // Hold the cooldown open so "during the wait" is observable.
+      sleepMock.mockImplementationOnce(() => cooldown.promise);
+
+      const { queue, executed } = makeQueue({
+        'amz-1': { status: RunStatus.BLOCKED, cooldownMs: 128_000 },
+      });
+
+      void queue.enqueue('amz-1', AMAZON);
+      void queue.enqueue('amz-2', AMAZON);
+      void queue.enqueue('ebay-1', EBAY);
+      await settle();
+
+      expect(slept()).toEqual([128_000]);
+      // Amazon's next run is correctly held...
+      expect(executed).not.toContain('amz-2');
+      // ...while eBay ran straight through the wall it has nothing to do with.
+      expect(executed).toContain('ebay-1');
+
+      cooldown.release();
+      await settle();
+      expect(executed).toContain('amz-2'); // delayed, never lost
+    });
+
+    it('counts queued runs across every lane', async () => {
+      const held = deferred();
+      const { queue } = makeQueue(
+        {},
+        { 'amz-1': held.promise, 'ebay-1': held.promise },
+      );
+
+      void queue.enqueue('amz-1', AMAZON);
+      void queue.enqueue('amz-2', AMAZON);
+      void queue.enqueue('ebay-1', EBAY);
+      void queue.enqueue('ebay-2', EBAY);
+      await settle();
+
+      // One in flight per lane, one still pending in each.
+      expect(queue.size()).toBe(2);
+
+      held.release();
+      await settle();
+      expect(queue.size()).toBe(0);
+    });
+
+    /** cancel() has to search every lane now, not just the one active run. */
+    it('cancels a queued run in whichever lane holds it', async () => {
+      const held = deferred();
+      // ebay-1 must be the held one: it is what keeps ebay-2 QUEUED long enough to
+      // be cancellable. Holding only amz-1 would let the eBay lane drain completely
+      // and the test would pass or fail for reasons unrelated to lane lookup.
+      const { queue, executed } = makeQueue({}, { 'ebay-1': held.promise });
+
+      void queue.enqueue('amz-1', AMAZON);
+      void queue.enqueue('ebay-1', EBAY);
+      void queue.enqueue('ebay-2', EBAY);
+      await settle();
+
+      // ebay-2 is queued behind ebay-1 in the eBay lane.
+      await expect(queue.cancel('ebay-2')).resolves.toBe(true);
+      await expect(queue.cancel('nope')).resolves.toBe(false);
+
+      held.release();
+      await settle();
+      expect(executed).not.toContain('ebay-2');
+    });
+
+    /** Shutdown must sweep every lane, not just whichever one drained last. */
+    it('marks orphans across all lanes on shutdown', async () => {
+      const held = deferred();
+      // Typed rather than cast: the assertion below reads calls[0][0] several
+      // levels deep, and on a bare jest.fn() that whole path is `any`.
+      type OrphanUpdate = { where: { id: { in: string[] } } };
+      const updateMany = jest
+        .fn<Promise<unknown>, [OrphanUpdate]>()
+        .mockResolvedValue({});
+
+      const runner = {
+        execute: async (runId: string) => {
+          if (runId === 'amz-1') await held.promise;
+          return {
+            status: RunStatus.SUCCEEDED,
+            itemsFound: 0,
+            itemsNew: 0,
+            itemsUpdated: 0,
+          };
+        },
+        cancel: () => true,
+      } as unknown as CrawlRunnerService;
+      const prisma = {
+        crawlRun: { update: () => Promise.resolve({}), updateMany },
+      } as unknown as PrismaService;
+      const queue = new InMemoryCrawlQueue(runner, prisma);
+
+      void queue.enqueue('amz-1', AMAZON);
+      void queue.enqueue('amz-2', AMAZON);
+      void queue.enqueue('ebay-1', EBAY);
+      await settle();
+
+      await queue.onModuleDestroy();
+
+      const orphans = updateMany.mock.calls[0][0].where.id.in;
+      // The active Amazon run and the one queued behind it. eBay's already finished.
+      expect(orphans).toEqual(expect.arrayContaining(['amz-1', 'amz-2']));
+
+      held.release();
+    });
   });
 
   describe('block cascade', () => {
@@ -116,16 +313,17 @@ describe('InMemoryCrawlQueue', () => {
      * A whole day of that marketplace's data destroyed by a single wall.
      *
      * This did not exist before: one job meant one run, so there was nothing behind
-     * it to burn.
+     * it to burn. Lanes do not change it — within a marketplace the cascade is
+     * exactly as dangerous, which is why this whole block still applies per lane.
      */
-    it('holds the queue for the cooldown after a BLOCKED run', async () => {
+    it('holds the lane for the cooldown after a BLOCKED run', async () => {
       const { queue, executed } = makeQueue({
         b: { status: RunStatus.BLOCKED, cooldownMs: 128_000 },
       });
 
-      void queue.enqueue('a');
-      void queue.enqueue('b');
-      void queue.enqueue('c');
+      void queue.enqueue('a', AMAZON);
+      void queue.enqueue('b', AMAZON);
+      void queue.enqueue('c', AMAZON);
       await settle();
 
       expect(slept()).toEqual([128_000]);
@@ -135,8 +333,8 @@ describe('InMemoryCrawlQueue', () => {
 
     it('does not hold on a successful run', async () => {
       const { queue } = makeQueue();
-      void queue.enqueue('a');
-      void queue.enqueue('b');
+      void queue.enqueue('a', AMAZON);
+      void queue.enqueue('b', AMAZON);
       await settle();
 
       expect(slept()).toEqual([]);
@@ -145,8 +343,8 @@ describe('InMemoryCrawlQueue', () => {
     /** FAILED is a blip, not a wall — the host is owed nothing, so there is nothing to wait out. */
     it('does not hold on a FAILED run', async () => {
       const { queue } = makeQueue({ a: { status: RunStatus.FAILED, error: 'timeout' } });
-      void queue.enqueue('a');
-      void queue.enqueue('b');
+      void queue.enqueue('a', AMAZON);
+      void queue.enqueue('b', AMAZON);
       await settle();
 
       expect(slept()).toEqual([]);
@@ -158,22 +356,44 @@ describe('InMemoryCrawlQueue', () => {
      */
     it('does not hold when the block reports no cooldown', async () => {
       const { queue } = makeQueue({ a: { status: RunStatus.BLOCKED } });
-      void queue.enqueue('a');
-      void queue.enqueue('b');
+      void queue.enqueue('a', AMAZON);
+      void queue.enqueue('b', AMAZON);
       await settle();
 
       expect(slept()).toEqual([]);
     });
 
-    /** Nothing behind the blocked run — waiting would delay shutdown for no one. */
-    it('does not hold when the blocked run was the last one queued', async () => {
+    /** Nothing behind the blocked run IN ITS LANE — waiting would delay shutdown for no one. */
+    it('does not hold when the blocked run was the last one queued for that marketplace', async () => {
       const { queue } = makeQueue({
         a: { status: RunStatus.BLOCKED, cooldownMs: 128_000 },
       });
-      void queue.enqueue('a');
+      void queue.enqueue('a', AMAZON);
       await settle();
 
       expect(slept()).toEqual([]);
+    });
+
+    /**
+     * The guard is per-lane, so a run queued for a DIFFERENT marketplace must not
+     * make Amazon's lane wait. Reading queue depth globally would do exactly that.
+     */
+    it('does not hold when only another marketplace has runs queued behind it', async () => {
+      const held = deferred();
+      const { queue } = makeQueue(
+        { 'amz-1': { status: RunStatus.BLOCKED, cooldownMs: 128_000 } },
+        { 'ebay-1': held.promise },
+      );
+
+      void queue.enqueue('amz-1', AMAZON);
+      void queue.enqueue('ebay-1', EBAY);
+      void queue.enqueue('ebay-2', EBAY);
+      await settle();
+
+      expect(slept()).toEqual([]);
+
+      held.release();
+      await settle();
     });
   });
 });

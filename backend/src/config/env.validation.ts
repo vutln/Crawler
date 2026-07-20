@@ -58,12 +58,23 @@ export class EnvVars {
   @IsOptional()
   SELENIUM_TIMEOUT_MS = 30_000;
 
+  /**
+   * Concurrent Chrome instances. 3 = one per marketplace.
+   *
+   * This is the real ceiling on the queue's per-marketplace lanes: each lane needs
+   * a driver to crawl, so at 2 the third lane sits waiting on WebDriverFactory
+   * rather than running, and a third of the concurrency the lanes exist to provide
+   * never materializes. Raise this alongside any new Selenium marketplace.
+   *
+   * The cost is memory — roughly 200-400MB per Chrome — so this is the knob to
+   * turn DOWN on a small box, accepting that lanes then take turns.
+   */
   @IsInt()
   @Min(1)
   @Max(8)
   @Transform(({ value }) => parseInt(value as string, 10))
   @IsOptional()
-  SELENIUM_MAX_DRIVERS = 2;
+  SELENIUM_MAX_DRIVERS = 3;
 
   @IsInt()
   @Min(0)

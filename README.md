@@ -13,6 +13,18 @@ A _scraper_ grabs a price once. A **collector** re-visits the same product on a 
 </tr>
 </table>
 
+## Learning Reports
+
+<p>
+  <a href="docs/learning_reports/REPORT-en.md">
+    <strong>📘 Learning Report</strong>
+  </a>
+  &nbsp;·&nbsp;
+  <a href="docs/learning_reports/REPORT-vn.md">
+    <strong>📕 Báo cáo học tập — Tiếng Việt</strong>
+  </a>
+</p>
+
 ## Features
 
 - **Price history, not snapshots** — every observation is an immutable row; the chart is the product

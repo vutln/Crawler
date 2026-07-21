@@ -62,6 +62,9 @@ export const deleteKeyword = (id: string) =>
 export const listCrawlJobs = (signal?: AbortSignal) =>
   request<CrawlJob[]>('/crawl-jobs', { signal });
 
+export const getCrawlJob = (id: string, signal?: AbortSignal) =>
+  request<CrawlJob>(`/crawl-jobs/${id}`, { signal });
+
 export const createCrawlJob = (body: CreateCrawlJobInput) =>
   request<CrawlJob>('/crawl-jobs', { method: 'POST', body });
 

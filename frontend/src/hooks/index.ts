@@ -28,6 +28,7 @@ export {
 // Crawl jobs and runs
 export {
   useCrawlJobs,
+  useCrawlJob,
   useCrawlRuns,
   useTriggerCrawl,
   useCancelRun,

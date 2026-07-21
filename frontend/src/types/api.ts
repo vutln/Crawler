@@ -38,6 +38,9 @@ export type ProductListQuery = NonNullable<operations['ProductsController_list']
 export type ProductExportQuery = NonNullable<
   operations['ProductsController_exportCsv']['parameters']['query']
 >;
+
+export type CrawlJobListQuery = NonNullable<operations['CrawlJobsController_findAll']['parameters']['query']>
+
 export type CrawlRunListQuery = NonNullable<operations['CrawlRunsController_list']['parameters']['query']>;
 
 /** Hand-written: @ApiQuery on a bare param widens to `string` in the spec. */

@@ -30,12 +30,12 @@ function intParam(value: string | null, fallback: number): number {
  * Garbage params degrade to defaults; a hand-edited URL must not white-screen. The
  * enum guards come from src/domain, so an unknown status is simply dropped.
  */
-export function useCrawlRunsQueryParams() {
+export function useCrawlRunsQueryParams(queryParams?: CrawlRunListQuery) {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const filters = useMemo<RunFilters>(() => {
-    const status = searchParams.get('status');
-    const marketplace = searchParams.get('marketplace');
+    const status = queryParams?.status ?? searchParams.get('status');
+    const marketplace = queryParams?.marketplace ?? searchParams.get('marketplace');
 
     return {
       page: intParam(searchParams.get('page'), 1),
@@ -44,11 +44,11 @@ export function useCrawlRunsQueryParams() {
       marketplace: isMarketplace(marketplace) ? marketplace : undefined,
       // Ids aren't guarded: they're server-side, so an unknown one matches nothing
       // and the list is simply empty. That degrades better than a 400.
-      jobId: searchParams.get('jobId') ?? undefined,
-      keywordId: searchParams.get('keywordId') ?? undefined,
-      batchId: searchParams.get('batchId') ?? undefined,
+      jobId: queryParams?.jobId ?? searchParams.get('jobId') ?? undefined,
+      keywordId: queryParams?.keywordId ?? searchParams.get('keywordId') ?? undefined,
+      batchId: queryParams?.batchId ?? searchParams.get('batchId') ?? undefined,
     };
-  }, [searchParams]);
+  }, [searchParams, queryParams]);
 
   const setFilters = useCallback(
     (patch: Partial<RunFilters>) => {

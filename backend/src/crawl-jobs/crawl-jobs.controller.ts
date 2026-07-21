@@ -42,7 +42,8 @@ export class CrawlJobsController {
   @Post()
   @ApiOperation({
     summary: 'Create a crawl job definition',
-    description: 'A definition is a template. It produces a CrawlRun each time it fires.',
+    description:
+      'A definition is a template. It produces a CrawlRun each time it fires.',
   })
   @ApiCreatedResponse({ type: CrawlJobDto })
   create(@Body() dto: CreateCrawlJobDto): Promise<CrawlJobDto> {
@@ -57,7 +58,10 @@ export class CrawlJobsController {
 
   @Patch(':id')
   @ApiOkResponse({ type: CrawlJobDto })
-  update(@Param('id') id: string, @Body() dto: UpdateCrawlJobDto): Promise<CrawlJobDto> {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateCrawlJobDto,
+  ): Promise<CrawlJobDto> {
     return this.jobs.update(id, dto);
   }
 

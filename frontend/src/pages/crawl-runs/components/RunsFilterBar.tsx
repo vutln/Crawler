@@ -17,6 +17,7 @@ export function RunsFilterBar({
   onReset,
   hasActiveFilters,
   isRefreshing,
+  hasJobId
 }: {
   filters: {
     status?: RunStatus;
@@ -35,6 +36,7 @@ export function RunsFilterBar({
   onReset: () => void;
   hasActiveFilters: boolean;
   isRefreshing: boolean;
+  hasJobId?: boolean;
 }) {
   const jobs = useCrawlJobs();
   const keywords = useKeywords();
@@ -49,13 +51,15 @@ export function RunsFilterBar({
         testId="filter-status"
       />
 
-      <Select<Marketplace>
-        value={filters.marketplace ?? ''}
-        onChange={(v) => onChange({ marketplace: v })}
-        placeholder="All sites"
-        options={MARKETPLACE_OPTIONS}
-        testId="filter-marketplace"
-      />
+      {!hasJobId && (
+        <Select<Marketplace>
+          value={filters.marketplace ?? ''}
+          onChange={(v) => onChange({ marketplace: v })}
+          placeholder="All sites"
+          options={MARKETPLACE_OPTIONS}
+          testId="filter-marketplace"
+        />
+      )}
 
       <Select<string>
         value={filters.keywordId ?? ''}

@@ -37,6 +37,7 @@ export {
 // Endpoints — crawl jobs and runs
 export {
   listCrawlJobs,
+  getCrawlJob,
   createCrawlJob,
   updateCrawlJob,
   deleteCrawlJob,

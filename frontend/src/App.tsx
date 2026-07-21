@@ -7,6 +7,7 @@ import ProductsPage from '@/pages/products';
 import KeywordsPage from '@/pages/keywords';
 import CrawlJobsPage from '@/pages/crawl-jobs';
 import CrawlRunsPage from '@/pages/crawl-runs';
+import CrawlJobDetailPage from '@/pages/crawl-job-detail';
 
 const ProductDetailPage = lazy(() => import('@/pages/product-detail'));
 
@@ -14,7 +15,7 @@ export default function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        <Route index element={<DashboardPage />} />
+        <Route index element={<DashboardPage />} /> 
         <Route path="products" element={<ProductsPage />} />
         <Route
           path="products/:id"
@@ -32,6 +33,20 @@ export default function App() {
         />
         <Route path="keywords" element={<KeywordsPage />} />
         <Route path="crawl-jobs" element={<CrawlJobsPage />} />
+        <Route 
+          path="crawl-jobs/:id" 
+          element={
+            <Suspense
+              fallback={
+                <div className="flex justify-center py-16">
+                  <Spinner className="h-6 w-6" />
+                </div>
+              }
+            >
+              <CrawlJobDetailPage />
+            </Suspense>
+          } 
+        />
         <Route path="crawl-runs" element={<CrawlRunsPage />} />
         <Route
           path="*"

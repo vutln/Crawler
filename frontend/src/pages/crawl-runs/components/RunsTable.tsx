@@ -12,8 +12,8 @@ import { isActiveStatus } from '@/domain';
 import { useCancelRun, useCrawlRuns, useCrawlRunsQueryParams } from '@/hooks';
 import { formatDuration, formatRelative } from '@/lib';
 
-export function RunsTable() {
-  const { filters, setFilters, reset, query, hasActiveFilters } = useCrawlRunsQueryParams();
+export function RunsTable({ jobId }: { jobId?: string }) {
+  const { filters, setFilters, reset, query, hasActiveFilters } = useCrawlRunsQueryParams({jobId});
   const runs = useCrawlRuns(query);
   const cancel = useCancelRun();
 

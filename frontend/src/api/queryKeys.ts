@@ -16,6 +16,7 @@ export const queryKeys = {
   crawlJobs: {
     all: ['crawl-jobs'] as const,
     list: () => ['crawl-jobs', 'list'] as const,
+    detail: (id: string) => ['crawl-jobs', 'detail', id] as const,
   },
   crawlRuns: {
     all: ['crawl-runs'] as const,

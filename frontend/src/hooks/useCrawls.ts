@@ -10,6 +10,7 @@ import {
   cancelCrawlRun,
   createCrawlJob,
   deleteCrawlJob,
+  getCrawlJob,
   listCrawlJobs,
   listCrawlRuns,
   queryKeys,
@@ -39,6 +40,13 @@ export function useCrawlJobs() {
       const anyActive = jobs.some((job) => job.lastRun && isActiveStatus(job.lastRun.status));
       return anyActive ? 2000 : 15_000;
     },
+  });
+}
+
+export function useCrawlJob(id: string) {
+  return useQuery({
+    queryKey: queryKeys.crawlJobs.detail(id),
+    queryFn: ({ signal }) => getCrawlJob(id, signal),
   });
 }
 

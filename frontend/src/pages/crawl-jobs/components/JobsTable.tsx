@@ -3,6 +3,7 @@ import { Button, Card, EmptyState, ErrorState, JobStatusBadge, Modal, SiteBadge,
 import { useCrawlJobs, useDeleteCrawlJob, useKeywords, useTriggerCrawl } from '@/hooks';
 import { formatRelative } from '@/lib';
 import { JobForm } from './JobForm';
+import { useNavigate } from 'react-router-dom';
 
 export function JobsTable() {
   const jobs = useCrawlJobs();
@@ -17,6 +18,8 @@ export function JobsTable() {
   // loading, so the cell omits the number rather than flashing a wrong one.
   const keywords = useKeywords();
   const keywordCount = keywords.data?.length;
+
+  const navigate = useNavigate();
 
   return (
     <Card>
@@ -56,7 +59,14 @@ export function JobsTable() {
             </thead>
             <tbody>
               {jobs.data.map((job) => (
-                <tr key={job.id} className="border-t border-slate-100" data-testid="job-row">
+                <tr 
+                  key={job.id} 
+                  className="border-t border-slate-100 hover:cursor-pointer hover:bg-slate-50"
+                  data-testid="job-row"
+                  onClick={() => {
+                    navigate(`/crawl-jobs/${job.id}`);
+                  }}
+                >
                   <td className="px-3 py-1.5 font-medium text-slate-800">{job.name}</td>
                   <td className="px-3 py-1.5">
                     <SiteBadge marketplace={job.marketplace} />
@@ -105,7 +115,7 @@ export function JobsTable() {
                       <span className="text-slate-400">never</span>
                     )}
                   </td>
-                  <td className="px-3 py-1.5 text-right">
+                  <td className="px-3 py-1.5 text-right" onClick={(e) => e.stopPropagation()}>
                     <Button
                       size="sm"
                       onClick={() => trigger.mutate(job.id)}

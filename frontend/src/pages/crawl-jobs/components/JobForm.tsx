@@ -48,6 +48,8 @@ export function JobForm({ job, onDone }: { job?: CrawlJob; onDone: () => void })
   const nothingSelected = !trackAll && picked.size === 0;
 
   const submit = () => {
+    const cronExpression = cron.trim();
+
     const common = {
       name: name.trim(),
       maxPages: Number(maxPages) || 2,
@@ -59,14 +61,29 @@ export function JobForm({ job, onDone }: { job?: CrawlJob; onDone: () => void })
       // serves 60 per page, so a hardcoded 100 cut page 2 two-thirds through with
       // nothing in the run to say so. maxPages is the bound.
       maxItems: null,
-      cronExpression: cron.trim() || undefined,
     };
 
     if (job) {
-      update.mutate({ id: job.id, ...common }, { onSuccess: onDone });
+      update.mutate(
+        {
+          id: job.id,
+          ...common,
+          // PATCH distinguishes "not supplied" from "clear this value".
+          // An empty edit must therefore send null, not undefined.
+          cronExpression: cronExpression || null,
+        },
+        { onSuccess: onDone },
+      );
     } else {
       create.mutate(
-        { ...common, marketplace, type: 'KEYWORD_SWEEP', enabled: true },
+        {
+          ...common,
+          marketplace,
+          type: 'KEYWORD_SWEEP',
+          enabled: true,
+          // The create DTO uses omission to represent a manual-only job.
+          cronExpression: cronExpression || undefined,
+        },
         { onSuccess: onDone },
       );
     }

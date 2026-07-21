@@ -27,10 +27,11 @@ import type {
   PaginatedCrawlRuns,
 } from '@/types';
 
-export function useCrawlJobs() {
+export function useCrawlJobs(enabled = true) {
   return useQuery({
     queryKey: queryKeys.crawlJobs.list(),
     queryFn: ({ signal }) => listCrawlJobs(signal),
+    enabled,
 
     // Each job embeds its latest run, so this list goes stale exactly like the
     // runs list. Mutation invalidation alone isn't enough: it fires while the
@@ -47,6 +48,13 @@ export function useCrawlJob(id: string) {
   return useQuery({
     queryKey: queryKeys.crawlJobs.detail(id),
     queryFn: ({ signal }) => getCrawlJob(id, signal),
+    enabled: Boolean(id),
+    // The detail header embeds the latest run. Keep that status moving after a
+    // manual trigger instead of freezing at QUEUED until the user reloads.
+    refetchInterval: (query) => {
+      const latest = query.state.data?.lastRun;
+      return latest && isActiveStatus(latest.status) ? 2000 : 15_000;
+    },
   });
 }
 
@@ -189,6 +197,8 @@ export function useDeleteCrawlJob() {
   return useMutation({
     mutationFn: (id: string) => deleteCrawlJob(id),
     onSuccess: () => toast.success('Job deleted'),
+    onError: (error) =>
+      toast.error(error instanceof ApiError ? error.message : 'Failed to delete job'),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.crawlJobs.all });
       void queryClient.invalidateQueries({ queryKey: queryKeys.crawlRuns.all });

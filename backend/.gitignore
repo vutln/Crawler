@@ -18,6 +18,7 @@ coverage/
 test-artifacts/
 
 # logs / editor / OS
+logs/
 *.log
 npm-debug.log*
 .idea/

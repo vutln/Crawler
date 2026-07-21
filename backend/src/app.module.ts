@@ -1,13 +1,15 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { validateEnv } from './config/env.validation';
-import { CrawlJobsModule } from './crawl-jobs/crawl-jobs.module';
-import { CrawlerModule } from './crawler/crawler.module';
-import { HealthModule } from './health/health.module';
-import { KeywordsModule } from './keywords/keywords.module';
-import { PrismaModule } from './prisma/prisma.module';
-import { ProductsModule } from './products/products.module';
+
 import { StatsModule } from './stats/stats.module';
+import { PrismaModule } from './prisma/prisma.module';
+import { validateEnv } from './config/env.validation';
+import { HealthModule } from './health/health.module';
+import { CrawlerModule } from './crawler/crawler.module';
+import { LoggingModule } from './logging/logging.module';
+import { KeywordsModule } from './keywords/keywords.module';
+import { ProductsModule } from './products/products.module';
+import { CrawlJobsModule } from './crawl-jobs/crawl-jobs.module';
 
 @Module({
   imports: [
@@ -18,6 +20,7 @@ import { StatsModule } from './stats/stats.module';
       envFilePath: ['.env'],
       cache: true,
     }),
+    LoggingModule,
     PrismaModule,
     CrawlerModule,
     ProductsModule,

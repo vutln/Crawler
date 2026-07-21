@@ -18,6 +18,16 @@ export enum NodeEnv {
   Test = 'test',
 }
 
+export enum LogLevel {
+  Error = 'error',
+  Warn = 'warn',
+  Info = 'info',
+  Http = 'http',
+  Verbose = 'verbose',
+  Debug = 'debug',
+  Silly = 'silly',
+}
+
 /** `"true"`/`"false"` from .env are strings; coerce before @IsBoolean sees them. */
 const toBool = () =>
   Transform(({ value }) => {
@@ -38,6 +48,29 @@ export class EnvVars {
   @Transform(({ value }) => parseInt(value as string, 10))
   @IsOptional()
   PORT = 3000;
+
+  @IsEnum(LogLevel)
+  @IsOptional()
+  LOG_LEVEL: LogLevel = LogLevel.Info;
+
+  @IsString()
+  @IsNotEmpty()
+  @IsOptional()
+  LOG_DIR = 'logs';
+
+  /** Bytes per file before Winston rotates it. */
+  @IsInt()
+  @Min(1024)
+  @Transform(({ value }) => parseInt(value as string, 10))
+  @IsOptional()
+  LOG_MAX_SIZE = 10_485_760;
+
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  @Transform(({ value }) => parseInt(value as string, 10))
+  @IsOptional()
+  LOG_MAX_FILES = 5;
 
   @IsString()
   @IsNotEmpty()

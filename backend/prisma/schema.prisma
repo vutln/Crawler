@@ -262,9 +262,10 @@ model CrawlRun {
   id           String     @id @default(cuid())
   jobId        String
   job          CrawlJob   @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  /// Which keyword this run collected. Null for SEARCH / PRODUCT_URLS jobs, which
-  /// take their term from CrawlJob.query — that nullability is what lets this
-  /// migration be additive and leaves existing jobs working untouched.
+  /// Which keyword this run collected. Set for KEYWORD_SWEEP runs and null for
+  /// PRODUCT_URLS runs, which crawl the URLs stored on CrawlJob and need no search
+  /// term. It may later become null because onDelete: SetNull preserves run history
+  /// when a keyword is deleted.
   keywordId    String?
   keyword      Keyword?   @relation(fields: [keywordId], references: [id], onDelete: SetNull)
   /// Groups the N runs produced by one cron fire.

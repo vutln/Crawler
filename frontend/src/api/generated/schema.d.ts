@@ -87,7 +87,7 @@ export interface paths {
         };
         /**
          * List every tracked keyword
-         * @description The daily sweep runs each ENABLED keyword against all three marketplaces. Adding one here changes what tomorrow collects; no job or cron edit is needed.
+         * @description Keywords are available to KEYWORD_SWEEP jobs. A job with trackAllKeywords=true collects every keyword, including ones added later; otherwise it collects only its selected keywords.
          */
         get: operations["KeywordsController_findAll"];
         put?: never;
@@ -137,8 +137,8 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Rename a keyword, or enable/disable it
-         * @description Disabling keeps the keyword and its collected links but skips it in the sweep. Prefer it to deletion when you only want to stop collecting.
+         * Rename a keyword or update its notes
+         * @description This does not change which jobs collect the keyword. To stop collecting it on one marketplace, deselect it from that crawl job. Deleting the keyword removes it from every job while preserving products and price history.
          */
         patch: operations["KeywordsController_update"];
         trace?: never;

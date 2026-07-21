@@ -35,8 +35,9 @@ export class KeywordsController {
   @ApiOperation({
     summary: 'List every tracked keyword',
     description:
-      'The daily sweep runs each ENABLED keyword against all three marketplaces. ' +
-      'Adding one here changes what tomorrow collects; no job or cron edit is needed.',
+      'Keywords are available to KEYWORD_SWEEP jobs. A job with ' +
+      'trackAllKeywords=true collects every keyword, including ones added later; ' +
+      'otherwise it collects only its selected keywords.',
   })
   @ApiOkResponse({ type: [KeywordDto] })
   findAll(): Promise<KeywordDto[]> {
@@ -46,7 +47,9 @@ export class KeywordsController {
   @Post()
   @ApiOperation({ summary: 'Add one keyword' })
   @ApiCreatedResponse({ type: KeywordDto })
-  @ApiConflictResponse({ description: 'A keyword with the same normalized text already exists.' })
+  @ApiConflictResponse({
+    description: 'A keyword with the same normalized text already exists.',
+  })
   create(@Body() dto: CreateKeywordDto): Promise<KeywordDto> {
     return this.keywords.create(dto);
   }
@@ -63,7 +66,9 @@ export class KeywordsController {
   @ApiOkResponse({ type: BulkCreateKeywordsResultDto })
   // 200, not 201: this is a report on a partially-applied batch, not a single
   // created resource, and there is no one Location to point at.
-  bulkCreate(@Body() dto: BulkCreateKeywordsDto): Promise<BulkCreateKeywordsResultDto> {
+  bulkCreate(
+    @Body() dto: BulkCreateKeywordsDto,
+  ): Promise<BulkCreateKeywordsResultDto> {
     return this.keywords.bulkCreate(dto);
   }
 
@@ -75,14 +80,20 @@ export class KeywordsController {
 
   @Patch(':id')
   @ApiOperation({
-    summary: 'Rename a keyword, or enable/disable it',
+    summary: 'Rename a keyword or update its notes',
     description:
-      'Disabling keeps the keyword and its collected links but skips it in the sweep. ' +
-      'Prefer it to deletion when you only want to stop collecting.',
+      'This does not change which jobs collect the keyword. To stop collecting it ' +
+      'on one marketplace, deselect it from that crawl job. Deleting the keyword ' +
+      'removes it from every job while preserving products and price history.',
   })
   @ApiOkResponse({ type: KeywordDto })
-  @ApiConflictResponse({ description: 'The new text collides with an existing keyword.' })
-  update(@Param('id') id: string, @Body() dto: UpdateKeywordDto): Promise<KeywordDto> {
+  @ApiConflictResponse({
+    description: 'The new text collides with an existing keyword.',
+  })
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateKeywordDto,
+  ): Promise<KeywordDto> {
     return this.keywords.update(id, dto);
   }
 

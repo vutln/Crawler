@@ -14,6 +14,9 @@ RUN npm install --fetch-retries=5 --fetch-retry-mintimeout=20000 --fetch-retry-m
 # Copy Prisma schema and generate client
 COPY prisma ./prisma
 RUN npx prisma generate
+# Fix Prisma 7 generating .ts imports on Linux which breaks Node.js require()
+RUN find src/generated/prisma -type f -name "*.ts" -exec sed -i 's/\.ts"/.js"/g' {} +
+RUN find src/generated/prisma -type f -name "*.ts" -exec sed -i "s/\.ts'/.js'/g" {} +
 
 # Copy the rest of the application code
 COPY . .

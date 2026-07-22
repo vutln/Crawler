@@ -5,8 +5,11 @@ services:
     environment:
       MYSQL_DATABASE: crawler
       MYSQL_ROOT_PASSWORD: CGSUyIMw2Zzek3Fp3Sp1U4w8
+      TZ: Asia/Ho_Chi_Minh
     volumes:
       - db_data:/var/lib/mysql
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
 
   backend:
     build:
@@ -15,6 +18,10 @@ services:
     environment:
       DATABASE_URL: mysql://root:CGSUyIMw2Zzek3Fp3Sp1U4w8@db:3306/crawler
       CRAWL_COOKIES_JSON: '[{"name":"i18n-prefs","value":"USD","domain":".amazon.com","path":"/"},{"name":"lc-main","value":"en_US","domain":".amazon.com","path":"/"}]'
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
     depends_on:
       - db
 

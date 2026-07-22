@@ -193,9 +193,11 @@ export function RunsTable({
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() =>
-                            cancel.mutate(run.id)
-                          }
+                          onClick={() => {
+                            if (window.confirm('Are you sure you want to cancel this run? This action cannot be undone.')) {
+                              cancel.mutate(run.id);
+                            }
+                          }}
                         >
                           Cancel
                         </Button>

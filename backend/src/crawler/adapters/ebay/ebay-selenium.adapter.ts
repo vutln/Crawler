@@ -90,6 +90,7 @@ export class EbaySeleniumAdapter extends SeleniumAdapterBase {
     yield* this.drivers.withDriverIterable(
       (driver) => this.searchIn(driver, ctx.query!, ctx),
       ctx.signal,
+      ctx.diagnosticLabel,
     );
   }
 

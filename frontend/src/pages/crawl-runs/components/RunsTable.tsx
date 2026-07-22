@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Button,
   Card,
@@ -19,6 +19,7 @@ import {
   formatDuration,
   formatRelative,
 } from '@/lib';
+import { DiagnosticsModal } from './DiagnosticsModal';
 
 export function RunsTable({
   jobId,
@@ -29,6 +30,7 @@ export function RunsTable({
     () => (jobId ? { jobId } : undefined),
     [jobId],
   );
+  const [diagnosticsRun, setDiagnosticsRun] = useState<string | null>(null);
 
   const {
     filters,
@@ -185,7 +187,17 @@ export function RunsTable({
                     {formatRelative(run.createdAt)}
                   </td>
 
-                  <td className="whitespace-nowrap px-3 py-1.5 text-right">
+                  <td className="whitespace-nowrap px-3 py-1.5 text-right space-x-2">
+                    {run.status === 'FAILED' && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        onClick={() => setDiagnosticsRun(run.id)}
+                      >
+                        Diagnostics
+                      </Button>
+                    )}
                     {isActiveStatus(run.status) &&
                       !run.id.startsWith(
                         'optimistic-',
@@ -265,6 +277,12 @@ export function RunsTable({
             />
           </div>
         )}
+
+      <DiagnosticsModal
+        open={diagnosticsRun !== null}
+        onClose={() => setDiagnosticsRun(null)}
+        prefix={diagnosticsRun ? `error-run_${diagnosticsRun}` : undefined}
+      />
     </Card>
   );
 }

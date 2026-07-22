@@ -348,6 +348,7 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
     yield* this.drivers.withDriverIterable(
       (driver) => this.searchIn(driver, query, ctx),
       ctx.signal,
+      ctx.diagnosticLabel,
     );
   }
 
@@ -518,13 +519,14 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
     const asin = this.extractAsin(url);
     if (!asin) throw new Error(`Could not extract ASIN from ${url}`);
 
-    return this.drivers.withDriver(async (driver) => {
-      await this.navigate(driver, url, ctx);
-      // Detail pages hide the price for the same reason search cards do, and carry
-      // the same nav widget — so set the address here, then reload for the price.
-      await this.ensureDeliveryAddress(driver, ctx, url);
+    return this.drivers.withDriver(
+      async (driver) => {
+        await this.navigate(driver, url, ctx);
+        // Detail pages hide the price for the same reason search cards do, and carry
+        // the same nav widget — so set the address here, then reload for the price.
+        await this.ensureDeliveryAddress(driver, ctx, url);
 
-      const rendered = await this.waitForAny(driver, [
+        const rendered = await this.waitForAny(driver, [
         '#productTitle',
         '#dp-container',
       ]);

@@ -80,6 +80,7 @@ export class EtsySeleniumAdapter extends SeleniumAdapterBase {
     yield* this.drivers.withDriverIterable(
       (driver) => this.searchIn(driver, ctx.query!, ctx),
       ctx.signal,
+      ctx.diagnosticLabel,
     );
   }
 
@@ -258,7 +259,7 @@ export class EtsySeleniumAdapter extends SeleniumAdapterBase {
         ),
         raw: { priceText },
       };
-    });
+    }, ctx.signal, ctx.diagnosticLabel);
   }
 
   private extractListingId(url: string): string | null {

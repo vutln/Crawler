@@ -3,7 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { Builder, type WebDriver, logging } from 'selenium-webdriver';
 import { Marketplace } from '../../generated/prisma/client';
 import { Options as ChromeOptions } from 'selenium-webdriver/chrome';
-
+import * as fs from 'fs/promises';
+import * as path from 'path';
 type SameSite = 'Strict' | 'Lax' | 'None';
 
 interface SeedCookie {
@@ -176,12 +177,16 @@ export class WebDriverFactory implements OnModuleDestroy {
   async withDriver<T>(
     fn: (driver: WebDriver) => Promise<T>,
     signal?: AbortSignal,
+    contextLabel?: string,
   ): Promise<T> {
     await this.acquireSlot(signal);
     let driver: WebDriver | undefined;
     try {
       driver = await this.create();
       return await fn(driver);
+    } catch (e) {
+      if (driver) await this.captureDiagnostics(driver, e, contextLabel);
+      throw e;
     } finally {
       if (driver) await this.quit(driver);
       this.releaseSlot();
@@ -211,15 +216,38 @@ export class WebDriverFactory implements OnModuleDestroy {
   async *withDriverIterable<T>(
     fn: (driver: WebDriver) => AsyncIterable<T>,
     signal?: AbortSignal,
+    contextLabel?: string,
   ): AsyncIterable<T> {
     await this.acquireSlot(signal);
     let driver: WebDriver | undefined;
     try {
       driver = await this.create();
       yield* fn(driver);
+    } catch (e) {
+      if (driver) await this.captureDiagnostics(driver, e, contextLabel);
+      throw e;
     } finally {
       if (driver) await this.quit(driver);
       this.releaseSlot();
+    }
+  }
+
+  private async captureDiagnostics(driver: WebDriver, error: unknown, contextLabel?: string): Promise<void> {
+    try {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const dir = path.join(process.cwd(), 'logs', 'diagnostics');
+      await fs.mkdir(dir, { recursive: true });
+      const prefix = `error-${contextLabel || 'unknown'}-${timestamp}`;
+
+      const screenshot = await driver.takeScreenshot();
+      await fs.writeFile(path.join(dir, `${prefix}.png`), screenshot, 'base64');
+
+      const source = await driver.getPageSource();
+      await fs.writeFile(path.join(dir, `${prefix}.html`), source, 'utf-8');
+
+      this.logger.error(`Saved error diagnostics to logs/diagnostics/${prefix}.*`);
+    } catch (e) {
+      this.logger.warn(`Failed to capture diagnostics: ${(e as Error).message}`);
     }
   }
 

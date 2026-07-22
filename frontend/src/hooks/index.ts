@@ -39,6 +39,7 @@ export {
 
 // Filter state, stored in the URL rather than component state
 export type { ProductFilters } from './useProductsQueryParams';
+export * from './useDiagnostics';
 export { useProductsQueryParams } from './useProductsQueryParams';
 export type { RunFilters } from './useCrawlRunsQueryParams';
 export { useCrawlRunsQueryParams } from './useCrawlRunsQueryParams';

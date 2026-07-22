@@ -57,10 +57,22 @@ export async function fillAndSubmit(
     return false;
   }
 
-  const box = await rt.driver.findElement(By.css(cfg.input.join(', ')));
+  const elements = await rt.driver.findElements(By.css(cfg.input.join(', ')));
+  let box = null;
+  for (const el of elements) {
+    if (await el.isDisplayed()) {
+      box = el;
+      break;
+    }
+  }
+
+  if (!box) {
+    rt.logger.warn(`Search input found but none are visible`);
+    return false;
+  }
+
   await box.clear();
   await box.sendKeys(cfg.value);
-
   // Through transition(), so pressing Enter is throttled and block-checked like
   // any other request rather than slipping past both.
   await rt.transition(async () => {

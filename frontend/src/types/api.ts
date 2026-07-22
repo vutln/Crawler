@@ -45,3 +45,9 @@ export type CrawlRunListQuery = NonNullable<operations['CrawlRunsController_list
 
 /** Hand-written: @ApiQuery on a bare param widens to `string` in the spec. */
 export type PriceHistoryInterval = 'raw' | 'hour' | 'day';
+
+export interface DiagnosticFile {
+  name: string;
+  size: number;
+  createdAt: string;
+}

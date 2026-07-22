@@ -17,6 +17,7 @@ import type {
   StatsOverview,
   UpdateCrawlJobInput,
   UpdateKeywordInput,
+  DiagnosticFile,
 } from '@/types';
 
 // `signal` threaded throughout so TanStack Query can cancel in-flight requests.
@@ -94,3 +95,6 @@ export const cancelCrawlRun = (id: string) =>
 
 export const getStatsOverview = (signal?: AbortSignal) =>
   request<StatsOverview>('/stats/overview', { signal });
+
+export const listDiagnostics = (prefix?: string, signal?: AbortSignal) =>
+  request<DiagnosticFile[]>('/diagnostics', { query: { prefix }, signal });

@@ -43,6 +43,7 @@ export interface CrawlContext {
   /** Adapters must check this between pages. */
   signal: AbortSignal;
   logger: LoggerService;
+  diagnosticLabel?: string;
 }
 
 /**

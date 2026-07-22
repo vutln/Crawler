@@ -46,5 +46,5 @@ export {
   cancelCrawlRun,
 } from './endpoints';
 
-// Endpoints — stats
-export { getStatsOverview } from './endpoints';
+// Endpoints — stats & diagnostics
+export { getStatsOverview, listDiagnostics } from './endpoints';

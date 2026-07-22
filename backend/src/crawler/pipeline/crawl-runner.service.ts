@@ -186,6 +186,10 @@ export class CrawlRunnerService {
     const adapter = this.registry.resolve(job.marketplace);
     const logger = new Logger(`${adapter.name}:${runId.slice(0, 8)}`);
 
+    const safeName = (s?: string) => (s || '').replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    const kwOrProduct = keyword?.text || (Array.isArray(job.urls) && job.urls.length > 0 ? 'urls' : 'unknown');
+    const diagnosticLabel = `run_${runId}_job_${safeName(job.name)}_kw_${safeName(kwOrProduct)}`;
+
     const ctx: CrawlContext = {
       /**
        * The run's keyword is the only source of a search term now — CrawlJob has no
@@ -210,6 +214,7 @@ export class CrawlRunnerService {
       maxItems: job.maxItems ?? Number.POSITIVE_INFINITY,
       signal,
       logger,
+      diagnosticLabel,
     };
 
     // Persist per record rather than batching at the end: a run that dies on

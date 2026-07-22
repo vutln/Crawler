@@ -10,6 +10,7 @@ import { LoggingModule } from './logging/logging.module';
 import { KeywordsModule } from './keywords/keywords.module';
 import { ProductsModule } from './products/products.module';
 import { CrawlJobsModule } from './crawl-jobs/crawl-jobs.module';
+import { DiagnosticsModule } from './diagnostics/diagnostics.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { CrawlJobsModule } from './crawl-jobs/crawl-jobs.module';
     CrawlJobsModule,
     StatsModule,
     HealthModule,
+    DiagnosticsModule,
   ],
 })
 export class AppModule {}

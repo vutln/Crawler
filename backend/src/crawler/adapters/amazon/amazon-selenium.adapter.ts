@@ -490,7 +490,7 @@ export class AmazonSeleniumAdapter extends SeleniumAdapterBase {
     return {
       externalId: asin,
       // /dp/<asin> is the canonical form; search hrefs carry heavy tracking noise.
-      url: href ? canonicalUrl(href, this.origin) : `${this.origin}/dp/${asin}`,
+      url: `${this.origin}/dp/${asin}`,
       title: cleanText(title),
       price,
       currency: normalizeCurrency(currency),

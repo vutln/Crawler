@@ -1,0 +1,6 @@
+-- AlterTable
+ALTER TABLE `CrawlJob` MODIFY `type` ENUM('KEYWORD_SWEEP', 'PRODUCT_URLS') NOT NULL;
+
+-- AlterTable
+ALTER TABLE `Keyword` ADD COLUMN `niche` VARCHAR(255) NULL,
+    MODIFY `text` VARCHAR(255) NOT NULL;

@@ -10,6 +10,7 @@ export interface RunFilters {
   marketplace?: Marketplace;
   jobId?: string;
   keywordId?: string;
+  niche?: string;
   batchId?: string;
 }
 
@@ -46,6 +47,7 @@ export function useCrawlRunsQueryParams(queryParams?: CrawlRunListQuery) {
       // and the list is simply empty. That degrades better than a 400.
       jobId: queryParams?.jobId ?? searchParams.get('jobId') ?? undefined,
       keywordId: queryParams?.keywordId ?? searchParams.get('keywordId') ?? undefined,
+      niche: queryParams?.niche ?? searchParams.get('niche') ?? undefined,
       batchId: queryParams?.batchId ?? searchParams.get('batchId') ?? undefined,
     };
   }, [searchParams, queryParams]);
@@ -86,13 +88,14 @@ export function useCrawlRunsQueryParams(queryParams?: CrawlRunListQuery) {
       ...(filters.marketplace && { marketplace: filters.marketplace }),
       ...(filters.jobId && { jobId: filters.jobId }),
       ...(filters.keywordId && { keywordId: filters.keywordId }),
+      ...(filters.niche && { niche: filters.niche }),
       ...(filters.batchId && { batchId: filters.batchId }),
     }),
     [filters],
   );
 
   const hasActiveFilters = Boolean(
-    filters.status ?? filters.marketplace ?? filters.jobId ?? filters.keywordId ?? filters.batchId,
+    filters.status ?? filters.marketplace ?? filters.jobId ?? filters.keywordId ?? filters.niche ?? filters.batchId,
   );
 
   return { filters, setFilters, reset, query, hasActiveFilters };

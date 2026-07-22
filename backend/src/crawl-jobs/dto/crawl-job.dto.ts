@@ -305,6 +305,9 @@ export class ListCrawlRunsDto {
   /** "Show me every run that collected this keyword" — across all marketplaces. */
   @ApiPropertyOptional() @IsString() @IsOptional() keywordId?: string;
 
+  /** "Show me every run whose keyword belongs to this niche" */
+  @ApiPropertyOptional() @IsString() @IsOptional() niche?: string;
+
   /** "Show me one sweep" — the N runs a single cron fire produced. */
   @ApiPropertyOptional() @IsString() @IsOptional() batchId?: string;
 }

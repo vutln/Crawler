@@ -228,6 +228,7 @@ export class CrawlJobsService {
       ...(query.jobId && { jobId: query.jobId }),
       ...(query.marketplace && { job: { marketplace: query.marketplace } }),
       ...(query.keywordId && { keywordId: query.keywordId }),
+      ...(query.niche && { keyword: { niche: query.niche } }),
       ...(query.batchId && { batchId: query.batchId }),
     };
 

@@ -41,7 +41,7 @@ export type ProductExportQuery = NonNullable<
 
 export type CrawlJobListQuery = NonNullable<operations['CrawlJobsController_findAll']['parameters']['query']>
 
-export type CrawlRunListQuery = NonNullable<operations['CrawlRunsController_list']['parameters']['query']>;
+export type CrawlRunListQuery = NonNullable<operations['CrawlRunsController_list']['parameters']['query']> & { niche?: string };
 
 /** Hand-written: @ApiQuery on a bare param widens to `string` in the spec. */
 export type PriceHistoryInterval = 'raw' | 'hour' | 'day';

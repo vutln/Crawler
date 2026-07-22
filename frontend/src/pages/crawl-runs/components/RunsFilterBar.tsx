@@ -27,6 +27,7 @@ export function RunsFilterBar({
     marketplace?: Marketplace;
     jobId?: string;
     keywordId?: string;
+    niche?: string;
     batchId?: string;
   };
   onChange: (patch: {
@@ -34,6 +35,7 @@ export function RunsFilterBar({
     marketplace?: Marketplace;
     jobId?: string;
     keywordId?: string;
+    niche?: string;
     batchId?: string;
   }) => void;
   onReset: () => void;
@@ -82,15 +84,29 @@ export function RunsFilterBar({
       )}
 
       {!hideKeyword && (
-        <Select<string>
-          value={filters.keywordId ?? ''}
-          onChange={(value) =>
-            onChange({ keywordId: value })
-          }
-          placeholder="All keywords"
-          options={resolvedKeywordOptions}
-          testId="filter-keyword"
-        />
+        <>
+          <Select<string>
+            value={filters.keywordId ?? ''}
+            onChange={(value) =>
+              onChange({ keywordId: value })
+            }
+            placeholder="All keywords"
+            options={resolvedKeywordOptions}
+            testId="filter-keyword"
+          />
+
+          <Select<string>
+            value={filters.niche ?? ''}
+            onChange={(value) =>
+              onChange({ niche: value })
+            }
+            placeholder="All niches"
+            options={Array.from(new Set((keywords.data ?? []).map((k) => k.niche).filter(Boolean))).map(
+              (niche) => ({ value: niche!, label: niche! }),
+            )}
+            testId="filter-niche"
+          />
+        </>
       )}
 
       {!hasJobId && (

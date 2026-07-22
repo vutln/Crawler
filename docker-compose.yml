@@ -22,6 +22,7 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
+      - ./backend/logs:/app/logs
     depends_on:
       - db
 

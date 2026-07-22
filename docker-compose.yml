@@ -1,0 +1,30 @@
+services:
+  db:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_DATABASE: crawler
+      MYSQL_ROOT_PASSWORD: CGSUyIMw2Zzek3Fp3Sp1U4w8
+    volumes:
+      - db_data:/var/lib/mysql
+
+  backend:
+    build:
+      context: ./backend
+    restart: always
+    environment:
+      DATABASE_URL: mysql://root:CGSUyIMw2Zzek3Fp3Sp1U4w8@db:3306/crawler
+    depends_on:
+      - db
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: always
+    ports:
+      - '80:80'
+    depends_on:
+      - backend
+
+volumes:
+  db_data:

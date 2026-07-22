@@ -70,7 +70,9 @@ export class ListProductsDto {
   maxPrice?: number;
 
   @ApiPropertyOptional()
-  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @Transform(({ value }) =>
+    value === 'true' ? true : value === 'false' ? false : value,
+  )
   @IsBoolean()
   @IsOptional()
   inStock?: boolean;
@@ -82,7 +84,9 @@ export class ListProductsDto {
    * matches nothing, which degrades to an empty list rather than a 400. A
    * hand-edited URL should show "no results", not an error page.
    */
-  @ApiPropertyOptional({ description: 'Only products surfaced by this keyword' })
+  @ApiPropertyOptional({
+    description: 'Only products surfaced by this keyword',
+  })
   @IsString()
   @IsOptional()
   keywordId?: string;
@@ -96,7 +100,11 @@ export class ListProductsDto {
   @IsOptional()
   sortBy: ProductSortBy = ProductSortBy.LastScrapedAt;
 
-  @ApiPropertyOptional({ enum: SortOrder, enumName: 'SortOrder', default: SortOrder.Desc })
+  @ApiPropertyOptional({
+    enum: SortOrder,
+    enumName: 'SortOrder',
+    default: SortOrder.Desc,
+  })
   @IsEnum(SortOrder)
   @IsOptional()
   sortOrder: SortOrder = SortOrder.Desc;
@@ -114,7 +122,13 @@ export class ListProductsDto {
  * expectation, and exporting only the page the user happens to be on is the most
  * common way this feature is built wrong.
  */
-export class ExportProductsDto extends OmitType(ListProductsDto, ['page', 'pageSize'] as const) {}
+export class ExportProductsDto extends OmitType(ListProductsDto, [
+  'page',
+  'pageSize',
+] as const) {}
 
 /** What buildWhere() needs — satisfied by both the list and the export DTOs. */
-export type ProductFilters = Omit<ListProductsDto, 'page' | 'pageSize' | 'sortBy' | 'sortOrder'>;
+export type ProductFilters = Omit<
+  ListProductsDto,
+  'page' | 'pageSize' | 'sortBy' | 'sortOrder'
+>;

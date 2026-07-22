@@ -71,12 +71,17 @@ export class ProductsService {
 
     // The keyword that surfaced the product. `some` because ProductKeyword is a
     // many-to-many: one product legitimately ranks for several keywords.
-    if (query.keywordId) where.keywords = { some: { keywordId: query.keywordId } };
+    if (query.keywordId)
+      where.keywords = { some: { keywordId: query.keywordId } };
 
     if (query.minPrice !== undefined || query.maxPrice !== undefined) {
       where.currentPrice = {
-        ...(query.minPrice !== undefined && { gte: new Prisma.Decimal(query.minPrice) }),
-        ...(query.maxPrice !== undefined && { lte: new Prisma.Decimal(query.maxPrice) }),
+        ...(query.minPrice !== undefined && {
+          gte: new Prisma.Decimal(query.minPrice),
+        }),
+        ...(query.maxPrice !== undefined && {
+          lte: new Prisma.Decimal(query.maxPrice),
+        }),
       };
     }
 
@@ -149,7 +154,10 @@ export class ProductsService {
         ...(cursor && { cursor: { id: cursor }, skip: 1 }),
         include: {
           keywords: {
-            select: { lastRank: true, keyword: { select: { id: true, text: true } } },
+            select: {
+              lastRank: true,
+              keyword: { select: { id: true, text: true } },
+            },
           },
         },
       });
@@ -184,7 +192,10 @@ export class ProductsService {
 
   private toCsvRow(
     product: Product & {
-      keywords: Array<{ lastRank: number | null; keyword: { id: string; text: string } }>;
+      keywords: Array<{
+        lastRank: number | null;
+        keyword: { id: string; text: string };
+      }>;
     },
     filteredKeywordId?: string,
   ): string {
@@ -265,7 +276,12 @@ export class ProductsService {
           }),
         },
         orderBy: { capturedAt: 'asc' },
-        select: { capturedAt: true, price: true, currency: true, inStock: true },
+        select: {
+          capturedAt: true,
+          price: true,
+          currency: true,
+          inStock: true,
+        },
       });
 
       return rows.map((r) => ({
@@ -278,10 +294,18 @@ export class ProductsService {
 
     // Bucketed. Raw SQL because Prisma's groupBy cannot express a date_format
     // truncation as a grouping key.
-    const format = interval === PriceHistoryInterval.Hour ? '%Y-%m-%d %H:00:00' : '%Y-%m-%d 00:00:00';
+    const format =
+      interval === PriceHistoryInterval.Hour
+        ? '%Y-%m-%d %H:00:00'
+        : '%Y-%m-%d 00:00:00';
 
     const rows = await this.prisma.$queryRaw<
-      Array<{ bucket: string; price: Prisma.Decimal | null; currency: string; inStock: number }>
+      Array<{
+        bucket: string;
+        price: Prisma.Decimal | null;
+        currency: string;
+        inStock: number;
+      }>
     >`
       SELECT
         DATE_FORMAT(capturedAt, ${format})           AS bucket,
@@ -342,7 +366,10 @@ export class ProductsService {
     `;
 
     const baseline = new Map(
-      rows.map((r) => [r.productId, r.basePrice === null ? null : Number(r.basePrice)]),
+      rows.map((r) => [
+        r.productId,
+        r.basePrice === null ? null : Number(r.basePrice),
+      ]),
     );
 
     for (const product of products) {
@@ -356,7 +383,10 @@ export class ProductsService {
         result.set(product.id, null);
         continue;
       }
-      result.set(product.id, Math.round(((current - base) / base) * 10000) / 100);
+      result.set(
+        product.id,
+        Math.round(((current - base) / base) * 10000) / 100,
+      );
     }
     return result;
   }

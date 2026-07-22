@@ -33,7 +33,10 @@ const URL = 'https://www.amazon.com/s?k=mechanical+keyboard';
 
 /** Same shape WebDriverFactory declares — sendDevToolsCommand is on the Chromium driver, not the base type. */
 type DevToolsWebDriver = WebDriver & {
-  sendDevToolsCommand(command: string, parameters?: Record<string, unknown>): Promise<void>;
+  sendDevToolsCommand(
+    command: string,
+    parameters?: Record<string, unknown>,
+  ): Promise<void>;
 };
 
 /**
@@ -79,7 +82,9 @@ async function makeDriver(): Promise<DevToolsWebDriver> {
     .forBrowser('chrome')
     .setChromeOptions(options)
     .build()) as DevToolsWebDriver;
-  await driver.manage().setTimeouts({ pageLoad: 30_000, script: 30_000, implicit: 0 });
+  await driver
+    .manage()
+    .setTimeouts({ pageLoad: 30_000, script: 30_000, implicit: 0 });
   return driver;
 }
 
@@ -135,7 +140,8 @@ describe('CANARY: Amazon still honours i18n-prefs=USD', () => {
 
   it('renders search results at all', async () => {
     if (blocked) return;
-    const cards = (html.match(/data-component-type="s-search-result"/g) ?? []).length;
+    const cards = (html.match(/data-component-type="s-search-result"/g) ?? [])
+      .length;
     expect(cards).toBeGreaterThan(0);
   });
 

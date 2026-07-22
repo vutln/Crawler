@@ -90,7 +90,7 @@ describe('EbaySeleniumAdapter — real eBay markup (captured 2026-07-17)', () =>
    * US host should keep passing. What must never happen is a VND magnitude
    * wearing a USD label — see normalizeCurrency.
    */
-  it('reports eBay\'s IP-localized currency truthfully, never as a guessed USD', () => {
+  it("reports eBay's IP-localized currency truthfully, never as a guessed USD", () => {
     const priced = records.filter((r) => r.price !== null);
     expect(priced.length).toBeGreaterThan(0);
 

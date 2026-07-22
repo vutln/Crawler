@@ -1,10 +1,17 @@
 import { Controller, Get, Injectable, Module } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
+import {
+  ApiOkResponse,
+  ApiOperation,
+  ApiProperty,
+  ApiTags,
+} from '@nestjs/swagger';
 import { PrismaService } from '../prisma/prisma.service';
 
 export class HealthDto {
-  @ApiProperty({ example: 'ok', enum: ['ok', 'degraded'] }) status!: 'ok' | 'degraded';
-  @ApiProperty({ example: 'up', enum: ['up', 'down'] }) database!: 'up' | 'down';
+  @ApiProperty({ example: 'ok', enum: ['ok', 'degraded'] }) status!:
+    'ok' | 'degraded';
+  @ApiProperty({ example: 'up', enum: ['up', 'down'] }) database!:
+    'up' | 'down';
   @ApiProperty({ description: 'Process uptime in seconds' }) uptime!: number;
   @ApiProperty({ format: 'date-time' }) timestamp!: string;
 }

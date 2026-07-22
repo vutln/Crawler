@@ -1,6 +1,9 @@
 import { Marketplace, RunStatus } from '../../generated/prisma/client';
 import type { PrismaService } from '../../prisma/prisma.service';
-import type { CrawlRunnerService, RunOutcome } from '../pipeline/crawl-runner.service';
+import type {
+  CrawlRunnerService,
+  RunOutcome,
+} from '../pipeline/crawl-runner.service';
 import { sleep } from '../politeness/throttle.service';
 import { InMemoryCrawlQueue } from './in-memory-crawl.queue';
 
@@ -70,7 +73,10 @@ describe('InMemoryCrawlQueue', () => {
     } as unknown as CrawlRunnerService;
 
     const prisma = {
-      crawlRun: { update: () => Promise.resolve({}), updateMany: () => Promise.resolve({}) },
+      crawlRun: {
+        update: () => Promise.resolve({}),
+        updateMany: () => Promise.resolve({}),
+      },
     } as unknown as PrismaService;
 
     return {
@@ -120,12 +126,20 @@ describe('InMemoryCrawlQueue', () => {
       execute: (runId: string) => {
         executed.push(runId);
         if (runId === 'boom') return Promise.reject(new Error('runner bug'));
-        return Promise.resolve({ status: RunStatus.SUCCEEDED, itemsFound: 0, itemsNew: 0, itemsUpdated: 0 });
+        return Promise.resolve({
+          status: RunStatus.SUCCEEDED,
+          itemsFound: 0,
+          itemsNew: 0,
+          itemsUpdated: 0,
+        });
       },
       cancel: () => true,
     } as unknown as CrawlRunnerService;
     const prisma = {
-      crawlRun: { update: () => Promise.resolve({}), updateMany: () => Promise.resolve({}) },
+      crawlRun: {
+        update: () => Promise.resolve({}),
+        updateMany: () => Promise.resolve({}),
+      },
     } as unknown as PrismaService;
     const queue = new InMemoryCrawlQueue(runner, prisma);
 
@@ -429,7 +443,9 @@ describe('InMemoryCrawlQueue', () => {
 
     /** FAILED is a blip, not a wall — the host is owed nothing, so there is nothing to wait out. */
     it('does not hold on a FAILED run', async () => {
-      const { queue } = makeQueue({ a: { status: RunStatus.FAILED, error: 'timeout' } });
+      const { queue } = makeQueue({
+        a: { status: RunStatus.FAILED, error: 'timeout' },
+      });
       void queue.enqueue('a', AMAZON);
       void queue.enqueue('b', AMAZON);
       await settle();

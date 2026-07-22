@@ -4,7 +4,11 @@ import { BlockDetectorService } from '../politeness/block-detector.service';
 import { RobotsService } from '../politeness/robots.service';
 import { ThrottleService } from '../politeness/throttle.service';
 import { WebDriverFactory } from '../driver/webdriver.factory';
-import { BlockedError, type CrawlContext, type ProductRecord } from './adapter.interface';
+import {
+  BlockedError,
+  type CrawlContext,
+  type ProductRecord,
+} from './adapter.interface';
 import { SeleniumAdapterBase } from './selenium-adapter.base';
 
 /**
@@ -126,7 +130,10 @@ describe('SeleniumAdapterBase.navigate — block handling', () => {
       // throws on `this.config.get` before ever reaching the block logic.
       config,
       drivers: {} as WebDriverFactory,
-      robots: { isAllowed: () => Promise.resolve(true), crawlDelayMs: () => Promise.resolve(null) } as unknown as RobotsService,
+      robots: {
+        isAllowed: () => Promise.resolve(true),
+        crawlDelayMs: () => Promise.resolve(null),
+      } as unknown as RobotsService,
       throttle,
       blockDetector: new BlockDetectorService(),
     });
@@ -139,8 +146,8 @@ describe('SeleniumAdapterBase.navigate — block handling', () => {
       signal: new AbortController().signal,
       maxPages: 1,
       maxItems: 10,
-      logger: { log: () => {}, warn: () => {}, error: () => {} } as never,
-    } as CrawlContext;
+      logger: { log: () => {}, warn: () => {}, error: () => {} },
+    };
   }
 
   it('loads a clean page once and records a success', async () => {
@@ -200,7 +207,9 @@ describe('SeleniumAdapterBase.navigate — block handling', () => {
     const { adapter, throttle } = makeAdapter();
     const { driver, loads } = makeDriver([DOGS_PAGE, CAPTCHA_PAGE, GOOD_PAGE]);
 
-    await expect(adapter.go(driver, URL, ctx())).rejects.toThrow(/blocked the request/i);
+    await expect(adapter.go(driver, URL, ctx())).rejects.toThrow(
+      /blocked the request/i,
+    );
     // 3 would mean we burned the last reload on a page that already said no —
     // and note the third page is GOOD, so doing so would have "succeeded".
     expect(loads()).toBe(2);
@@ -222,7 +231,9 @@ describe('SeleniumAdapterBase.navigate — block handling', () => {
     const { adapter, throttle } = makeAdapter();
     const { driver, loads } = makeDriver([CAPTCHA_PAGE, GOOD_PAGE]);
 
-    await expect(adapter.go(driver, URL, ctx())).rejects.toThrow(/blocked the request/i);
+    await expect(adapter.go(driver, URL, ctx())).rejects.toThrow(
+      /blocked the request/i,
+    );
     // Would be 2 if the retry ever leaked past the `ambiguous` guard — and note the
     // second page is GOOD, so a leaky retry would have silently "succeeded".
     expect(loads()).toBe(1);
@@ -234,7 +245,7 @@ describe('SeleniumAdapterBase.navigate — block handling', () => {
     const { driver, loads } = makeDriver([DOGS_PAGE, GOOD_PAGE]);
 
     const controller = new AbortController();
-    const aborted = { ...ctx(), signal: controller.signal } as CrawlContext;
+    const aborted = { ...ctx(), signal: controller.signal };
     controller.abort();
 
     await expect(adapter.go(driver, URL, aborted)).rejects.toThrow(/abort/i);
@@ -278,7 +289,9 @@ describe('SeleniumAdapterBase.navigate — block handling', () => {
         INTERSTITIAL_PAGE,
       ]);
 
-      await expect(adapter.go(driver, URL, ctx())).rejects.toThrow(BlockedError);
+      await expect(adapter.go(driver, URL, ctx())).rejects.toThrow(
+        BlockedError,
+      );
       // 1 + CRAWL_MAX_BLOCK_RELOADS, same ceiling the ambiguous path obeys.
       expect(loads()).toBe(3);
       expect(throttle.backoffMsFor(URL)).toBeGreaterThan(0);

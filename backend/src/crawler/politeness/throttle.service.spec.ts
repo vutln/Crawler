@@ -10,7 +10,9 @@ describe('ThrottleService', () => {
   const AMAZON = 'https://www.amazon.com/s?k=tungsten+cube';
   const EBAY = 'https://www.ebay.com/sch/i.html?_nkw=x';
 
-  function makeThrottle(overrides: Record<string, number> = {}): ThrottleService {
+  function makeThrottle(
+    overrides: Record<string, number> = {},
+  ): ThrottleService {
     const values: Record<string, number> = {
       CRAWL_MIN_DELAY_MS: 2000,
       CRAWL_MAX_BACKOFF_MS: 900_000,
@@ -106,7 +108,9 @@ describe('ThrottleService', () => {
 
     it('keys on hostname, so a different path on the same host still pays', () => {
       throttle.recordBlock(AMAZON);
-      expect(throttle.backoffMsFor('https://www.amazon.com/dp/B0CYY6SFYG')).toBe(128_000);
+      expect(
+        throttle.backoffMsFor('https://www.amazon.com/dp/B0CYY6SFYG'),
+      ).toBe(128_000);
     });
   });
 
@@ -134,7 +138,10 @@ describe('ThrottleService', () => {
      * the process restarts. Time served is what breaks that cycle.
      */
     it('decays with elapsed time even with no successes to spend', async () => {
-      const quick = makeThrottle({ CRAWL_MIN_DELAY_MS: 20, CRAWL_MAX_BACKOFF_MS: 1000 });
+      const quick = makeThrottle({
+        CRAWL_MIN_DELAY_MS: 20,
+        CRAWL_MAX_BACKOFF_MS: 1000,
+      });
       await quick.acquire(AMAZON);
       quick.recordBlock(AMAZON); // step 6 -> 20 * 64 = 1280ms, capped to 1000ms
 
@@ -220,7 +227,10 @@ describe('ThrottleService', () => {
     });
 
     it('decays with time served, like owedMsFor', async () => {
-      const quick = makeThrottle({ CRAWL_MIN_DELAY_MS: 20, CRAWL_MAX_BACKOFF_MS: 1000 });
+      const quick = makeThrottle({
+        CRAWL_MIN_DELAY_MS: 20,
+        CRAWL_MAX_BACKOFF_MS: 1000,
+      });
       await quick.acquire(AMAZON);
       quick.recordBlock(AMAZON);
 

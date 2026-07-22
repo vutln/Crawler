@@ -264,9 +264,14 @@ export class InMemoryCrawlQueue
 
     if (orphans.length === 0) return;
 
-    this.logger.warn(`Shutting down with ${orphans.length} unfinished run(s); marking FAILED`);
+    this.logger.warn(
+      `Shutting down with ${orphans.length} unfinished run(s); marking FAILED`,
+    );
     await this.prisma.crawlRun.updateMany({
-      where: { id: { in: orphans }, status: { in: [RunStatus.QUEUED, RunStatus.RUNNING] } },
+      where: {
+        id: { in: orphans },
+        status: { in: [RunStatus.QUEUED, RunStatus.RUNNING] },
+      },
       data: {
         status: RunStatus.FAILED,
         finishedAt: new Date(),

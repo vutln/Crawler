@@ -9,7 +9,9 @@ import { Options as ChromeOptions } from 'selenium-webdriver/chrome';
  * would be silly. Selenium Manager still resolves chromedriver against the
  * installed Chrome, so there's nothing to pin here either.
  */
-export async function createTestDriver(opts: { offline?: boolean } = {}): Promise<WebDriver> {
+export async function createTestDriver(
+  opts: { offline?: boolean } = {},
+): Promise<WebDriver> {
   const { offline = false } = opts;
 
   const options = new ChromeOptions();
@@ -42,7 +44,10 @@ export async function createTestDriver(opts: { offline?: boolean } = {}): Promis
     options.setPageLoadStrategy('eager');
   }
 
-  const driver = await new Builder().forBrowser('chrome').setChromeOptions(options).build();
+  const driver = await new Builder()
+    .forBrowser('chrome')
+    .setChromeOptions(options)
+    .build();
   await driver.manage().setTimeouts({ pageLoad: 30_000, implicit: 0 });
   return driver;
 }

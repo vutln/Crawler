@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import cronstrue from 'cronstrue';
 import { Button, Card, EmptyState, ErrorState, JobStatusBadge, Modal, SiteBadge, Spinner } from '@/components/ui';
 import { useCrawlJobs, useDeleteCrawlJob, useKeywords, useTriggerCrawl } from '@/hooks';
 import { formatRelative } from '@/lib';
@@ -50,6 +51,7 @@ export function JobsTable() {
               <tr className="text-left text-[11px] text-slate-500">
                 <th className="px-3 py-2 font-medium">Name</th>
                 <th className="px-3 py-2 font-medium">Site</th>
+                <th className="px-3 py-2 font-medium">Status</th>
                 {/* Was "Query" — a sweep has no query; it collects the keyword list. */}
                 <th className="px-3 py-2 font-medium">Collects</th>
                 <th className="px-3 py-2 font-medium">Schedule</th>
@@ -61,15 +63,28 @@ export function JobsTable() {
               {jobs.data.map((job) => (
                 <tr 
                   key={job.id} 
-                  className="border-t border-slate-100 hover:cursor-pointer hover:bg-slate-50"
+                  className={`border-t border-slate-100 hover:cursor-pointer hover:bg-slate-50 ${job.enabled ? '' : 'opacity-60'}`}
                   data-testid="job-row"
                   onClick={() => {
                     navigate(`/crawl-jobs/${job.id}`);
                   }}
                 >
-                  <td className="px-3 py-1.5 font-medium text-slate-800">{job.name}</td>
+                  <td className="px-3 py-1.5 font-medium text-slate-800">
+                    {job.name}
+                  </td>
                   <td className="px-3 py-1.5">
                     <SiteBadge marketplace={job.marketplace} />
+                  </td>
+                  <td className="px-3 py-1.5">
+                    {job.enabled ? (
+                      <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
+                        Enabled
+                      </span>
+                    ) : (
+                      <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+                        Paused
+                      </span>
+                    )}
                   </td>
                   {/*
                     Say what the job actually does. This read `job.query ?? \`${urls} URLs\``,
@@ -100,8 +115,23 @@ export function JobsTable() {
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-1.5 font-mono text-[11px] text-slate-500">
-                    {job.cronExpression ?? 'manual'}
+                  <td className="px-3 py-1.5">
+                    {job.cronExpression ? (
+                      <div className="flex flex-col">
+                        <span className="font-mono text-[11px] text-slate-700">{job.cronExpression}</span>
+                        <span className="text-[10px] text-slate-500">
+                          {(() => {
+                            try {
+                              return cronstrue.toString(job.cronExpression, { throwExceptionOnParseError: false });
+                            } catch {
+                              return '';
+                            }
+                          })()}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-[11px] text-slate-500">manual</span>
+                    )}
                   </td>
                   <td className="px-3 py-1.5">
                     {job.lastRun ? (

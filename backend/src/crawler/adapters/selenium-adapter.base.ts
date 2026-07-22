@@ -2,7 +2,10 @@ import { Inject, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { By, until, type WebDriver, type WebElement } from 'selenium-webdriver';
 import type { Marketplace } from '../../generated/prisma/client';
-import { BlockDetectorService, type BlockSignal } from '../politeness/block-detector.service';
+import {
+  BlockDetectorService,
+  type BlockSignal,
+} from '../politeness/block-detector.service';
 import { RobotsService } from '../politeness/robots.service';
 import { ThrottleService, sleep } from '../politeness/throttle.service';
 import { WebDriverFactory } from '../driver/webdriver.factory';
@@ -76,7 +79,8 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
   @Inject(WebDriverFactory) protected readonly drivers!: WebDriverFactory;
   @Inject(RobotsService) protected readonly robots!: RobotsService;
   @Inject(ThrottleService) protected readonly throttle!: ThrottleService;
-  @Inject(BlockDetectorService) protected readonly blockDetector!: BlockDetectorService;
+  @Inject(BlockDetectorService)
+  protected readonly blockDetector!: BlockDetectorService;
   @Inject(ConfigService) protected readonly config!: ConfigService;
 
   /**
@@ -102,7 +106,10 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
   }
 
   abstract search(ctx: CrawlContext): AsyncIterable<ProductRecord>;
-  abstract fetchProduct(url: string, ctx: CrawlContext): Promise<ProductRecord | null>;
+  abstract fetchProduct(
+    url: string,
+    ctx: CrawlContext,
+  ): Promise<ProductRecord | null>;
 
   /**
    * The only sanctioned way to load a page. Order matters: robots (don't fetch
@@ -446,7 +453,10 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
     timeoutMs = 15_000,
   ): Promise<boolean> {
     try {
-      await driver.wait(until.elementLocated(By.css(selectors.join(', '))), timeoutMs);
+      await driver.wait(
+        until.elementLocated(By.css(selectors.join(', '))),
+        timeoutMs,
+      );
       return true;
     } catch {
       return false;
@@ -462,7 +472,10 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
    * timeout. Zero characters after 15s isn't a slow page; it's a JS challenge
    * that rendered nothing — and no signature can match a page with no text.
    */
-  protected async diagnoseEmptyPage(driver: WebDriver, context: string): Promise<void> {
+  protected async diagnoseEmptyPage(
+    driver: WebDriver,
+    context: string,
+  ): Promise<void> {
     const [title, currentUrl, bodyText, html] = await Promise.all([
       driver.getTitle().catch(() => ''),
       driver.getCurrentUrl().catch(() => ''),
@@ -488,7 +501,9 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
     }
 
     if (text.length < EMPTY_BODY_THRESHOLD) {
-      this.logger.warn(`${context}: empty body after full render timeout — treating as blocked`);
+      this.logger.warn(
+        `${context}: empty body after full render timeout — treating as blocked`,
+      );
       this.recordBlockFor(currentUrl);
       throw new BlockedError(
         `${this.marketplace} served a page with no content — almost certainly a JavaScript ` +
@@ -527,7 +542,10 @@ export abstract class SeleniumAdapterBase implements MarketplaceAdapter {
    * text, and Amazon hides its price in `.a-offscreen` and its rating in
    * `.a-icon-alt`, both clipped to 0x0. Without it every price parses to null.
    */
-  protected async textOf(scope: WebElement, selectors: string[]): Promise<string | undefined> {
+  protected async textOf(
+    scope: WebElement,
+    selectors: string[],
+  ): Promise<string | undefined> {
     for (const selector of selectors) {
       try {
         const el = await scope.findElement(By.css(selector));

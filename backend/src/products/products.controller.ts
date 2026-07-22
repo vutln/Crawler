@@ -1,5 +1,11 @@
 import { Controller, Get, Param, Query, Res } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiProduces, ApiQuery, ApiTags } from '@nestjs/swagger';
+import {
+  ApiOkResponse,
+  ApiOperation,
+  ApiProduces,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Response } from 'express';
 import { ExportProductsDto, ListProductsDto } from './dto/list-products.dto';
 import {
@@ -16,7 +22,9 @@ export class ProductsController {
   constructor(private readonly products: ProductsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List collected products (paginated, filterable, sortable)' })
+  @ApiOperation({
+    summary: 'List collected products (paginated, filterable, sortable)',
+  })
   @ApiOkResponse({ type: PaginatedProductsDto })
   list(@Query() query: ListProductsDto): Promise<PaginatedProductsDto> {
     return this.products.list(query);
@@ -36,7 +44,10 @@ export class ProductsController {
   })
   @ApiProduces('text/csv')
   @ApiOkResponse({ description: 'CSV file (UTF-8 with BOM, CRLF)' })
-  async exportCsv(@Query() query: ExportProductsDto, @Res() res: Response): Promise<void> {
+  async exportCsv(
+    @Query() query: ExportProductsDto,
+    @Res() res: Response,
+  ): Promise<void> {
     // @Res() opts out of Nest's response handling — necessary here because the
     // service writes to the socket incrementally rather than returning a value.
     // The only @Res in the codebase; everything else should keep returning DTOs.
@@ -65,8 +76,18 @@ export class ProductsController {
       'The point of the collector. Use interval=hour|day to bucket server-side ' +
       'for long ranges; raw returns every snapshot.',
   })
-  @ApiQuery({ name: 'from', required: false, type: String, description: 'ISO date-time' })
-  @ApiQuery({ name: 'to', required: false, type: String, description: 'ISO date-time' })
+  @ApiQuery({
+    name: 'from',
+    required: false,
+    type: String,
+    description: 'ISO date-time',
+  })
+  @ApiQuery({
+    name: 'to',
+    required: false,
+    type: String,
+    description: 'ISO date-time',
+  })
   @ApiQuery({ name: 'interval', required: false, enum: PriceHistoryInterval })
   @ApiOkResponse({ type: [PricePointDto] })
   priceHistory(

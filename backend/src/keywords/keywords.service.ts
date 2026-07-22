@@ -82,7 +82,7 @@ export class KeywordsService {
     }
 
     const keyword = await this.prisma.keyword.create({
-      data: { text, notes: dto.notes ?? null },
+      data: { text, niche: dto.niche ?? null, notes: dto.notes ?? null },
       include: { _count: { select: { products: true } } },
     });
     return this.toDto(keyword);
@@ -95,7 +95,9 @@ export class KeywordsService {
    * nothing useful back. The screen needs to say "12 added, 3 already there",
    * because a silent no-op on a 50-line paste is indistinguishable from a bug.
    */
-  async bulkCreate(dto: BulkCreateKeywordsDto): Promise<BulkCreateKeywordsResultDto> {
+  async bulkCreate(
+    dto: BulkCreateKeywordsDto,
+  ): Promise<BulkCreateKeywordsResultDto> {
     // 1. Normalize, drop blanks, and de-dupe WITHIN the paste, preserving order.
     //    A pasted column routinely repeats itself; those are duplicates, and they
     //    are reported separately from terms that already exist on the server.
@@ -135,7 +137,7 @@ export class KeywordsService {
     //    the real authority, not the read.
     if (toCreate.length > 0) {
       await this.prisma.keyword.createMany({
-        data: toCreate.map((text) => ({ text })),
+        data: toCreate.map((text) => ({ text, niche: dto.niche ?? null })),
         skipDuplicates: true,
       });
     }
@@ -161,8 +163,12 @@ export class KeywordsService {
   async update(id: string, dto: UpdateKeywordDto): Promise<KeywordDto> {
     await this.assertExists(id);
 
-    const text = dto.text !== undefined ? KeywordsService.normalizeText(dto.text) : undefined;
-    if (text !== undefined && !text) throw new BadRequestException('Keyword cannot be blank');
+    const text =
+      dto.text !== undefined
+        ? KeywordsService.normalizeText(dto.text)
+        : undefined;
+    if (text !== undefined && !text)
+      throw new BadRequestException('Keyword cannot be blank');
 
     if (text !== undefined) {
       const clash = await this.prisma.keyword.findUnique({ where: { text } });
@@ -175,6 +181,7 @@ export class KeywordsService {
       where: { id },
       data: {
         ...(text !== undefined && { text }),
+        ...(dto.niche !== undefined && { niche: dto.niche }),
         ...(dto.notes !== undefined && { notes: dto.notes }),
       },
       include: { _count: { select: { products: true } } },
@@ -197,7 +204,10 @@ export class KeywordsService {
   }
 
   private async assertExists(id: string): Promise<void> {
-    const exists = await this.prisma.keyword.findUnique({ where: { id }, select: { id: true } });
+    const exists = await this.prisma.keyword.findUnique({
+      where: { id },
+      select: { id: true },
+    });
     if (!exists) throw new NotFoundException(`Keyword ${id} not found`);
   }
 
@@ -205,6 +215,7 @@ export class KeywordsService {
     return {
       id: keyword.id,
       text: keyword.text,
+      niche: keyword.niche,
       notes: keyword.notes,
       createdAt: keyword.createdAt.toISOString(),
       productCount: keyword._count?.products ?? 0,

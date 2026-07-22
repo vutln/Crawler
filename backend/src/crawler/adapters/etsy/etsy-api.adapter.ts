@@ -91,7 +91,10 @@ export class EtsyApiAdapter implements MarketplaceAdapter {
     }
   }
 
-  async fetchProduct(url: string, ctx: CrawlContext): Promise<ProductRecord | null> {
+  async fetchProduct(
+    url: string,
+    ctx: CrawlContext,
+  ): Promise<ProductRecord | null> {
     const listingId = /\/listing\/(\d+)/.exec(url)?.[1];
     if (!listingId) throw new Error(`Not an Etsy listing URL: ${url}`);
 
@@ -115,10 +118,13 @@ export class EtsyApiAdapter implements MarketplaceAdapter {
       // Etsy sends money as amount/divisor (e.g. 1250/100 = 12.50) to dodge
       // float issues. Dividing here is correct; treating `amount` as the price
       // would be off by 100x.
-      price: listing.price ? listing.price.amount / listing.price.divisor : null,
+      price: listing.price
+        ? listing.price.amount / listing.price.divisor
+        : null,
       currency: normalizeCurrency(listing.price?.currency_code),
       inStock: (listing.quantity ?? 0) > 0,
-      imageUrl: listing.images?.[0]?.url_570xN ?? listing.images?.[0]?.url_fullxfull,
+      imageUrl:
+        listing.images?.[0]?.url_570xN ?? listing.images?.[0]?.url_fullxfull,
       seller: listing.shop_id ? String(listing.shop_id) : undefined,
       // reviewCount is deliberately NOT set. This used to be `listing.num_favorers`,
       // which is Etsy's favourites/hearts count — a different quantity entirely,
@@ -144,7 +150,9 @@ export class EtsyApiAdapter implements MarketplaceAdapter {
 
     if (!res.ok) {
       this.throttle.recordFailure(url);
-      throw new Error(`Etsy API ${res.status}: ${cleanText(await res.text(), 300)}`);
+      throw new Error(
+        `Etsy API ${res.status}: ${cleanText(await res.text(), 300)}`,
+      );
     }
 
     this.throttle.recordSuccess(url);

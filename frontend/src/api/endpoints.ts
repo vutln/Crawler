@@ -50,8 +50,8 @@ export const createKeyword = (body: CreateKeywordInput) =>
   request<Keyword>('/keywords', { method: 'POST', body });
 
 /** Paste a list. Existing terms are skipped, not rejected — see the result shape. */
-export const bulkCreateKeywords = (keywords: string[]) =>
-  request<BulkCreateKeywordsResult>('/keywords/bulk', { method: 'POST', body: { keywords } });
+export const bulkCreateKeywords = (keywords: string[], niche?: string) =>
+  request<BulkCreateKeywordsResult>('/keywords/bulk', { method: 'POST', body: { keywords, niche } });
 
 export const updateKeyword = (id: string, body: UpdateKeywordInput) =>
   request<Keyword>(`/keywords/${id}`, { method: 'PATCH', body });

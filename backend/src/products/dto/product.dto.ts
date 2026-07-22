@@ -18,8 +18,10 @@ import { Marketplace } from '../../generated/prisma/client';
 // site and force null-checks for a state that cannot occur.
 export class ProductDto {
   @ApiProperty() id!: string;
-  @ApiProperty({ enum: Marketplace, enumName: 'Marketplace' }) marketplace!: Marketplace;
-  @ApiProperty({ description: 'ASIN / Etsy listing id / eBay item id' }) externalId!: string;
+  @ApiProperty({ enum: Marketplace, enumName: 'Marketplace' })
+  marketplace!: Marketplace;
+  @ApiProperty({ description: 'ASIN / Etsy listing id / eBay item id' })
+  externalId!: string;
   @ApiProperty() url!: string;
   @ApiProperty() title!: string;
 

@@ -8,8 +8,8 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   '₫': 'VND',
   '₹': 'INR',
   '₩': 'KRW',
-  'A$': 'AUD',
-  'C$': 'CAD',
+  A$: 'AUD',
+  C$: 'CAD',
 };
 
 export interface ParsedPrice {
@@ -103,7 +103,9 @@ export function detectCurrency(text: string): string | null {
   if (iso) return iso[1].toUpperCase();
 
   // Longest-first so "A$" and "C$" beat a bare "$".
-  const symbols = Object.keys(CURRENCY_SYMBOLS).sort((a, b) => b.length - a.length);
+  const symbols = Object.keys(CURRENCY_SYMBOLS).sort(
+    (a, b) => b.length - a.length,
+  );
   for (const symbol of symbols) {
     if (text.includes(symbol)) return CURRENCY_SYMBOLS[symbol];
   }
@@ -111,7 +113,9 @@ export function detectCurrency(text: string): string | null {
 }
 
 /** "4.5 out of 5 stars" | "4,5" -> 4.5. Out-of-range values are rejected, not clamped. */
-export function parseRating(input: string | null | undefined): number | undefined {
+export function parseRating(
+  input: string | null | undefined,
+): number | undefined {
   if (!input) return undefined;
   const match = /(\d+([.,]\d+)?)/.exec(input);
   if (!match) return undefined;
@@ -140,7 +144,9 @@ export function parseRating(input: string | null | undefined): number | undefine
  */
 const NOT_A_REVIEW_COUNT = /out of|\bstars?\b/i;
 
-export function parseReviewCount(input: string | null | undefined): number | undefined {
+export function parseReviewCount(
+  input: string | null | undefined,
+): number | undefined {
   if (!input) return undefined;
   if (NOT_A_REVIEW_COUNT.test(input)) return undefined;
 
@@ -155,7 +161,10 @@ export function parseReviewCount(input: string | null | undefined): number | und
 }
 
 /** Collapse whitespace; MySQL TEXT is fine with length but the UI is not. */
-export function cleanText(input: string | null | undefined, maxLength = 1000): string {
+export function cleanText(
+  input: string | null | undefined,
+  maxLength = 1000,
+): string {
   if (!input) return '';
   const flat = input.replace(/\s+/g, ' ').trim();
   return flat.length > maxLength ? flat.slice(0, maxLength) : flat;
@@ -166,11 +175,37 @@ export function canonicalUrl(input: string, base?: string): string {
   try {
     const url = new URL(input, base);
     const noise = [
-      'ref', 'ref_', 'pd_rd_i', 'pd_rd_r', 'pd_rd_w', 'pd_rd_wg', 'pf_rd_p',
-      'pf_rd_r', 'psc', 'th', 'qid', 'sr', 'keywords', 'sprefix', 'crid',
-      'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-      'hash', 'epid', '_trkparms', '_trksid', 'var', 'click_key', 'ga_order',
-      'ga_search_type', 'ga_view_type', 'ga_search_query', 'organic_search_click',
+      'ref',
+      'ref_',
+      'pd_rd_i',
+      'pd_rd_r',
+      'pd_rd_w',
+      'pd_rd_wg',
+      'pf_rd_p',
+      'pf_rd_r',
+      'psc',
+      'th',
+      'qid',
+      'sr',
+      'keywords',
+      'sprefix',
+      'crid',
+      'utm_source',
+      'utm_medium',
+      'utm_campaign',
+      'utm_term',
+      'utm_content',
+      'hash',
+      'epid',
+      '_trkparms',
+      '_trksid',
+      'var',
+      'click_key',
+      'ga_order',
+      'ga_search_type',
+      'ga_view_type',
+      'ga_search_query',
+      'organic_search_click',
       'frs',
     ];
     for (const param of noise) url.searchParams.delete(param);

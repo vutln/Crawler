@@ -3,7 +3,12 @@ import { ConfigService } from '@nestjs/config';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
 import { randomUUID } from 'node:crypto';
-import { CrawlJobType, RunStatus, RunTrigger, type CrawlJob } from '../../generated/prisma/client';
+import {
+  CrawlJobType,
+  RunStatus,
+  RunTrigger,
+  type CrawlJob,
+} from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CRAWL_QUEUE, type ICrawlQueue } from './crawl-queue.interface';
 
@@ -94,7 +99,9 @@ export class SchedulerService implements OnModuleInit {
 
     this.schedulerRegistry.addCronJob(name, cronJob);
     cronJob.start();
-    this.logger.log(`Scheduled "${label}" (${cronExpression} ${this.timezone})`);
+    this.logger.log(
+      `Scheduled "${label}" (${cronExpression} ${this.timezone})`,
+    );
   }
 
   private async trigger(jobId: string, label: string): Promise<void> {
@@ -110,11 +117,15 @@ export class SchedulerService implements OnModuleInit {
         where: { jobId, status: { in: [RunStatus.QUEUED, RunStatus.RUNNING] } },
       });
       if (outstanding > 0) {
-        this.logger.warn(`Skipping "${label}" — previous run still in progress`);
+        this.logger.warn(
+          `Skipping "${label}" — previous run still in progress`,
+        );
         return;
       }
 
-      const job = await this.prisma.crawlJob.findUnique({ where: { id: jobId } });
+      const job = await this.prisma.crawlJob.findUnique({
+        where: { id: jobId },
+      });
       if (!job) {
         this.logger.warn(`Skipping "${label}" — job no longer exists`);
         return;
@@ -122,7 +133,9 @@ export class SchedulerService implements OnModuleInit {
 
       await this.queueRunsFor(job, RunTrigger.SCHEDULED);
     } catch (err) {
-      this.logger.error(`Failed to trigger "${label}": ${(err as Error).message}`);
+      this.logger.error(
+        `Failed to trigger "${label}": ${(err as Error).message}`,
+      );
     }
   }
 
@@ -212,11 +225,16 @@ export class SchedulerService implements OnModuleInit {
       select: { id: true },
     });
 
-    this.logger.log(`"${job.name}" fanned out to ${runs.length} keyword(s) — batch ${batchId}`);
+    this.logger.log(
+      `"${job.name}" fanned out to ${runs.length} keyword(s) — batch ${batchId}`,
+    );
     return runs.map((r) => r.id);
   }
 
-  private async createSingleRun(jobId: string, trigger: RunTrigger): Promise<string> {
+  private async createSingleRun(
+    jobId: string,
+    trigger: RunTrigger,
+  ): Promise<string> {
     const run = await this.prisma.crawlRun.create({
       data: { jobId, status: RunStatus.QUEUED, trigger },
     });

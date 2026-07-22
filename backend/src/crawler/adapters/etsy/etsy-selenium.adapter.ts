@@ -34,7 +34,11 @@ export class EtsySeleniumAdapter extends SeleniumAdapterBase {
     ],
     title: ['h3[data-listing-card-listing-title]', 'h3.wt-text-caption', 'h3'],
     link: ['a.listing-link', 'a[href*="/listing/"]'],
-    price: ['span.currency-value', 'p.wt-text-title-01 span.currency-value', '.n-listing-card__price'],
+    price: [
+      'span.currency-value',
+      'p.wt-text-title-01 span.currency-value',
+      '.n-listing-card__price',
+    ],
     currency: ['span.currency-symbol'],
     image: ['img.wt-width-full', 'img[data-listing-card-listing-image]', 'img'],
     shop: ['p.wt-text-gray span', 'span.wt-text-truncate'],
@@ -64,7 +68,10 @@ export class EtsySeleniumAdapter extends SeleniumAdapterBase {
   private static readonly REVIEW_COUNT_SHAPE = /^\(\s*[\d.,]+\s*k?\s*\)$/i;
 
   /** Same list as sel.reviews; kept separate because reviewCountText walks ALL matches. */
-  private static readonly REVIEW_CANDIDATES = ['span.wt-text-body-01', 'p.wt-text-caption span'];
+  private static readonly REVIEW_CANDIDATES = [
+    'span.wt-text-body-01',
+    'p.wt-text-caption span',
+  ];
 
   /** One browser for the whole run, streaming. See EbaySeleniumAdapter.search. */
   async *search(ctx: CrawlContext): AsyncIterable<ProductRecord> {
@@ -125,7 +132,10 @@ export class EtsySeleniumAdapter extends SeleniumAdapterBase {
    * Split out from search() so tests can point a driver at a frozen HTML
    * fixture and exercise the real parser offline.
    */
-  protected parseSearchPage(driver: WebDriver, context = 'Etsy'): Promise<ProductRecord[]> {
+  protected parseSearchPage(
+    driver: WebDriver,
+    context = 'Etsy',
+  ): Promise<ProductRecord[]> {
     // Body lives in the base — it was byte-identical across all three adapters.
     return this.scrapeCards(
       driver,
@@ -140,7 +150,8 @@ export class EtsySeleniumAdapter extends SeleniumAdapterBase {
     if (!href) return null;
 
     const listingId =
-      (await el.getAttribute('data-listing-id'))?.trim() || this.extractListingId(href);
+      (await el.getAttribute('data-listing-id'))?.trim() ||
+      this.extractListingId(href);
     if (!listingId) return null;
 
     const title = await this.textOf(el, this.sel.title);
@@ -151,7 +162,9 @@ export class EtsySeleniumAdapter extends SeleniumAdapterBase {
     // currency. Recombine them before parsing.
     const symbol = await this.textOf(el, this.sel.currency);
     const value = await this.textOf(el, this.sel.price);
-    const { price, currency } = parsePrice([symbol, value].filter(Boolean).join(''));
+    const { price, currency } = parsePrice(
+      [symbol, value].filter(Boolean).join(''),
+    );
 
     return {
       externalId: listingId,
@@ -161,7 +174,9 @@ export class EtsySeleniumAdapter extends SeleniumAdapterBase {
       currency: normalizeCurrency(currency),
       inStock: price !== null,
       imageUrl: await this.attrOf(el, this.sel.image, 'src'),
-      seller: cleanText((await this.textOf(el, this.sel.shop)) ?? '', 191) || undefined,
+      seller:
+        cleanText((await this.textOf(el, this.sel.shop)) ?? '', 191) ||
+        undefined,
       rating: parseRating(await this.attrOf(el, this.sel.rating, 'aria-label')),
       reviewCount: parseReviewCount(await this.reviewCountText(el)),
       raw: { symbol, value },
@@ -180,25 +195,35 @@ export class EtsySeleniumAdapter extends SeleniumAdapterBase {
       const els = await el.findElements(By.css(selector)).catch(() => []);
       for (const candidate of els) {
         const text = (await candidate.getText().catch(() => ''))?.trim();
-        if (text && EtsySeleniumAdapter.REVIEW_COUNT_SHAPE.test(text)) return text;
+        if (text && EtsySeleniumAdapter.REVIEW_COUNT_SHAPE.test(text))
+          return text;
       }
     }
     return undefined;
   }
 
-  async fetchProduct(url: string, ctx: CrawlContext): Promise<ProductRecord | null> {
+  async fetchProduct(
+    url: string,
+    ctx: CrawlContext,
+  ): Promise<ProductRecord | null> {
     const listingId = this.extractListingId(url);
     if (!listingId) throw new Error(`Not an Etsy listing URL: ${url}`);
 
     return this.drivers.withDriver(async (driver) => {
       await this.navigate(driver, url, ctx);
 
-      const rendered = await this.waitForAny(driver, ['h1[data-buy-box-listing-title]', 'h1']);
+      const rendered = await this.waitForAny(driver, [
+        'h1[data-buy-box-listing-title]',
+        'h1',
+      ]);
       if (!rendered) return null;
 
       const body = await driver.findElement(By.css('body'));
 
-      const title = await this.textOf(body, ['h1[data-buy-box-listing-title]', 'h1']);
+      const title = await this.textOf(body, [
+        'h1[data-buy-box-listing-title]',
+        'h1',
+      ]);
       if (!title) return null;
 
       const priceText = await this.textOf(body, [
@@ -215,9 +240,22 @@ export class EtsySeleniumAdapter extends SeleniumAdapterBase {
         price,
         currency: normalizeCurrency(currency),
         inStock: price !== null,
-        imageUrl: await this.attrOf(body, ['img[data-src]', 'img.wt-max-width-full'], 'src'),
-        seller: cleanText((await this.textOf(body, ['a[href*="/shop/"] span', 'span.wt-text-title-01'])) ?? '', 191) || undefined,
-        rating: parseRating(await this.attrOf(body, ['input[name="rating"]'], 'value')),
+        imageUrl: await this.attrOf(
+          body,
+          ['img[data-src]', 'img.wt-max-width-full'],
+          'src',
+        ),
+        seller:
+          cleanText(
+            (await this.textOf(body, [
+              'a[href*="/shop/"] span',
+              'span.wt-text-title-01',
+            ])) ?? '',
+            191,
+          ) || undefined,
+        rating: parseRating(
+          await this.attrOf(body, ['input[name="rating"]'], 'value'),
+        ),
         raw: { priceText },
       };
     });

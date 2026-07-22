@@ -51,7 +51,9 @@ export class ProductsPage extends BasePage {
   }
 
   async search(term: string): Promise<void> {
-    const input = await this.driver.findElement(this.byTestId('product-search'));
+    const input = await this.driver.findElement(
+      this.byTestId('product-search'),
+    );
     await input.clear();
     await input.sendKeys(term);
     // The search box debounces at 300ms; without this the assertion races the
@@ -60,7 +62,9 @@ export class ProductsPage extends BasePage {
   }
 
   async filterMarketplace(value: string): Promise<void> {
-    const select = await this.driver.findElement(this.byTestId('marketplace-filter'));
+    const select = await this.driver.findElement(
+      this.byTestId('marketplace-filter'),
+    );
     await select.findElement(By.css(`option[value="${value}"]`)).click();
     await this.driver.sleep(500);
   }
@@ -82,7 +86,9 @@ export class ProductDetailPage extends BasePage {
   }
 
   async title(): Promise<string> {
-    return (await this.driver.findElement(this.byTestId('product-title'))).getText();
+    return (
+      await this.driver.findElement(this.byTestId('product-title'))
+    ).getText();
   }
 
   async hasChart(): Promise<boolean> {
@@ -156,7 +162,10 @@ export class CrawlRunsPage extends BasePage {
  * Screenshot on failure. A red E2E test with no artifact is nearly useless —
  * you get "element not found" with no idea what the page actually looked like.
  */
-export async function screenshot(driver: WebDriver, name: string): Promise<void> {
+export async function screenshot(
+  driver: WebDriver,
+  name: string,
+): Promise<void> {
   const dir = join(__dirname, '..', '..', 'test-artifacts');
   await mkdir(dir, { recursive: true });
   const png = await driver.takeScreenshot();

@@ -1,5 +1,9 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { CrawlJobType, Marketplace, RunTrigger } from '../generated/prisma/client';
+import {
+  CrawlJobType,
+  Marketplace,
+  RunTrigger,
+} from '../generated/prisma/client';
 import type { AdapterRegistry } from '../crawler/adapters/adapter.registry';
 import type { ICrawlQueue } from '../crawler/queue/crawl-queue.interface';
 import type { SchedulerService } from '../crawler/queue/scheduler.service';
@@ -18,7 +22,11 @@ import { CrawlJobsService } from './crawl-jobs.service';
  * way to turn a job into runs.
  */
 describe('CrawlJobsService.trigger', () => {
-  function make(opts: { type: CrawlJobType; outstanding?: number; runIds?: string[] }) {
+  function make(opts: {
+    type: CrawlJobType;
+    outstanding?: number;
+    runIds?: string[];
+  }) {
     const queued: Array<{ jobId: string; trigger: RunTrigger }> = [];
     const runIds = opts.runIds ?? ['run_1', 'run_2', 'run_3'];
 
@@ -50,7 +58,10 @@ describe('CrawlJobsService.trigger', () => {
               itemsUpdated: 0,
               error: null,
               createdAt: new Date(0),
-              job: { name: 'Daily keyword sweep (Amazon)', marketplace: Marketplace.AMAZON },
+              job: {
+                name: 'Daily keyword sweep (Amazon)',
+                marketplace: Marketplace.AMAZON,
+              },
               keyword: { text: `keyword ${i}` },
             })),
           ),
@@ -100,7 +111,10 @@ describe('CrawlJobsService.trigger', () => {
   });
 
   it('still produces a single run for a PRODUCT_URLS job', async () => {
-    const { service } = make({ type: CrawlJobType.PRODUCT_URLS, runIds: ['run_1'] });
+    const { service } = make({
+      type: CrawlJobType.PRODUCT_URLS,
+      runIds: ['run_1'],
+    });
     await expect(service.trigger('job_1')).resolves.toHaveLength(1);
   });
 
@@ -114,7 +128,10 @@ describe('CrawlJobsService.trigger', () => {
   });
 
   it('refuses to stack a run on a job that already has one outstanding', async () => {
-    const { service, queued } = make({ type: CrawlJobType.KEYWORD_SWEEP, outstanding: 2 });
+    const { service, queued } = make({
+      type: CrawlJobType.KEYWORD_SWEEP,
+      outstanding: 2,
+    });
     await expect(service.trigger('job_1')).rejects.toThrow(BadRequestException);
     expect(queued).toHaveLength(0);
   });

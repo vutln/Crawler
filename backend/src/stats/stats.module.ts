@@ -8,7 +8,8 @@ import { Marketplace, RunStatus } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export class MarketplaceStatDto {
-  @ApiProperty({ enum: Marketplace, enumName: 'Marketplace' }) marketplace!: Marketplace;
+  @ApiProperty({ enum: Marketplace, enumName: 'Marketplace' })
+  marketplace!: Marketplace;
   @ApiProperty() productCount!: number;
   @ApiProperty({
     nullable: true,
@@ -21,11 +22,13 @@ export class MarketplaceStatDto {
 export class StatsOverviewDto {
   @ApiProperty() totalProducts!: number;
   @ApiProperty() totalSnapshots!: number;
-  @ApiProperty({ description: 'Runs currently QUEUED or RUNNING' }) activeRuns!: number;
+  @ApiProperty({ description: 'Runs currently QUEUED or RUNNING' })
+  activeRuns!: number;
   @ApiProperty() totalJobs!: number;
   @ApiProperty({ description: 'Products whose price moved in the last 24h' })
   priceChanges24h!: number;
-  @ApiProperty({ type: [MarketplaceStatDto] }) byMarketplace!: MarketplaceStatDto[];
+  @ApiProperty({ type: [MarketplaceStatDto] })
+  byMarketplace!: MarketplaceStatDto[];
 }
 
 @Injectable()
@@ -38,19 +41,30 @@ export class StatsService {
   async overview(): Promise<StatsOverviewDto> {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    const [totalProducts, totalSnapshots, activeRuns, totalJobs, grouped, changes] =
-      await Promise.all([
-        this.prisma.product.count(),
-        this.prisma.priceSnapshot.count(),
-        this.prisma.crawlRun.count({
-          where: { status: { in: [RunStatus.QUEUED, RunStatus.RUNNING] } },
-        }),
-        this.prisma.crawlJob.count(),
-        this.prisma.product.groupBy({ by: ['marketplace'], _count: { _all: true } }),
-        this.priceChanges24h(since),
-      ]);
+    const [
+      totalProducts,
+      totalSnapshots,
+      activeRuns,
+      totalJobs,
+      grouped,
+      changes,
+    ] = await Promise.all([
+      this.prisma.product.count(),
+      this.prisma.priceSnapshot.count(),
+      this.prisma.crawlRun.count({
+        where: { status: { in: [RunStatus.QUEUED, RunStatus.RUNNING] } },
+      }),
+      this.prisma.crawlJob.count(),
+      this.prisma.product.groupBy({
+        by: ['marketplace'],
+        _count: { _all: true },
+      }),
+      this.priceChanges24h(since),
+    ]);
 
-    const adapters = new Map(this.registry.describe().map((d) => [d.marketplace, d.active]));
+    const adapters = new Map(
+      this.registry.describe().map((d) => [d.marketplace, d.active]),
+    );
     const counts = new Map(grouped.map((g) => [g.marketplace, g._count._all]));
 
     return {

@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { CrawlerModule } from '../crawler/crawler.module';
-import { CrawlJobsController, CrawlRunsController } from './crawl-jobs.controller';
+import {
+  CrawlJobsController,
+  CrawlRunsController,
+} from './crawl-jobs.controller';
 import { CrawlJobsService } from './crawl-jobs.service';
 
 @Module({

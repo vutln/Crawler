@@ -38,16 +38,18 @@ export function KeywordsTable({ keywords, isPending }: { keywords: Keyword[]; is
           <thead>
             <tr className="text-left text-[11px] text-slate-500">
               <th className="px-3 py-2 font-medium">Keyword</th>
+              <th className="px-3 py-2 font-medium">Niche</th>
               <th className="px-3 py-2 text-right font-medium">Products</th>
               <th className="px-3 py-2 text-right font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {isPending && <SkeletonRows rows={4} cols={3} />}
+            {isPending && <SkeletonRows rows={4} cols={4} />}
 
             {keywords.map((k) => (
               <tr key={k.id} className="border-t border-slate-100" data-testid="keyword-row">
                 <td className="px-3 py-1.5 font-medium text-slate-800">{k.text}</td>
+                <td className="px-3 py-1.5 text-slate-600">{k.niche || '—'}</td>
 
                 <td className="px-3 py-1.5 text-right">
                   {k.productCount > 0 ? (

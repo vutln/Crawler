@@ -40,11 +40,14 @@ export class FixtureServer {
     });
 
     await new Promise<void>((res) => this.server!.listen(0, '127.0.0.1', res));
-    this.port = (this.server!.address() as AddressInfo).port;
+    this.port = (this.server.address() as AddressInfo).port;
     return this.port;
   }
 
-  private async handle(url: string, res: import('node:http').ServerResponse): Promise<void> {
+  private async handle(
+    url: string,
+    res: import('node:http').ServerResponse,
+  ): Promise<void> {
     const requested = decodeURIComponent(url.split('?')[0]);
 
     // Path traversal guard. Fixtures are local and trusted, but a test harness

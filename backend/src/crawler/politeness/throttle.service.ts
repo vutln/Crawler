@@ -43,7 +43,10 @@ export class ThrottleService {
 
   constructor(private readonly config: ConfigService) {
     this.minDelayMs = this.config.get<number>('CRAWL_MIN_DELAY_MS', 2000);
-    this.maxBackoffMs = this.config.get<number>('CRAWL_MAX_BACKOFF_MS', 900_000);
+    this.maxBackoffMs = this.config.get<number>(
+      'CRAWL_MAX_BACKOFF_MS',
+      900_000,
+    );
   }
 
   /**

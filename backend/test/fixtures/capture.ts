@@ -20,7 +20,8 @@ import { Options as ChromeOptions } from 'selenium-webdriver/chrome';
 
 const SEARCH_URLS: Record<string, (q: string) => string> = {
   amazon: (q) => `https://www.amazon.com/s?k=${encodeURIComponent(q)}`,
-  ebay: (q) => `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(q)}&_ipg=60`,
+  ebay: (q) =>
+    `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(q)}&_ipg=60`,
   etsy: (q) => `https://www.etsy.com/search?q=${encodeURIComponent(q)}`,
 };
 
@@ -32,7 +33,9 @@ async function main(): Promise<void> {
   const query = queryParts.join(' ');
 
   if (!site || !query || !SEARCH_URLS[site]) {
-    console.error('Usage: npm run fixtures:capture -- <amazon|ebay|etsy> "<search query>"');
+    console.error(
+      'Usage: npm run fixtures:capture -- <amazon|ebay|etsy> "<search query>"',
+    );
     process.exit(1);
   }
 
@@ -40,8 +43,14 @@ async function main(): Promise<void> {
   console.log(`Capturing ${url}`);
 
   const options = new ChromeOptions();
-  options.addArguments('--window-size=1920,1080', '--disable-blink-features=AutomationControlled');
-  const driver = await new Builder().forBrowser('chrome').setChromeOptions(options).build();
+  options.addArguments(
+    '--window-size=1920,1080',
+    '--disable-blink-features=AutomationControlled',
+  );
+  const driver = await new Builder()
+    .forBrowser('chrome')
+    .setChromeOptions(options)
+    .build();
 
   try {
     await driver.get(url);
@@ -54,8 +63,12 @@ async function main(): Promise<void> {
     if (BLOCK_MARKERS.test(html)) {
       // Saving this would be actively harmful: the adapter tests would then
       // "pass" against a CAPTCHA page, asserting nothing.
-      console.error('\nBLOCKED: the site served an anti-bot page. Nothing captured.');
-      console.error('Try again later, from a different network, or use the official API.\n');
+      console.error(
+        '\nBLOCKED: the site served an anti-bot page. Nothing captured.',
+      );
+      console.error(
+        'Try again later, from a different network, or use the official API.\n',
+      );
       process.exit(2);
     }
 
@@ -66,8 +79,12 @@ async function main(): Promise<void> {
 
     console.log(`Wrote ${file} (${Math.round(html.length / 1024)} KB)`);
     console.log('Now run: npm test -- test/adapters');
-    console.log('If assertions fail, the real DOM differs from the placeholder — update the');
-    console.log('expected values in the spec to match what the site actually returns.');
+    console.log(
+      'If assertions fail, the real DOM differs from the placeholder — update the',
+    );
+    console.log(
+      'expected values in the spec to match what the site actually returns.',
+    );
   } finally {
     await driver.quit();
   }

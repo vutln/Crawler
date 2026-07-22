@@ -338,6 +338,7 @@ export interface components {
         KeywordDto: {
             id: string;
             text: string;
+            niche: string | null;
             notes: string | null;
             createdAt: string;
             /** @description How many products this keyword has surfaced, across every marketplace. */
@@ -346,6 +347,7 @@ export interface components {
         CreateKeywordDto: {
             /** @example mechanical keyboard */
             text: string;
+            niche?: string | null;
             notes?: string | null;
         };
         BulkCreateKeywordsDto: {
@@ -368,6 +370,7 @@ export interface components {
         };
         UpdateKeywordDto: {
             text?: string;
+            niche?: string | null;
             notes?: string | null;
         };
         /** @enum {string} */

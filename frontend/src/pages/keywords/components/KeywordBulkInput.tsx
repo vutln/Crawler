@@ -19,6 +19,7 @@ import type { Keyword } from '@/types';
 export function KeywordBulkInput({ existing }: { existing: Keyword[] }) {
   const bulk = useBulkCreateKeywords();
   const [raw, setRaw] = useState('');
+  const [niche, setNiche] = useState('');
 
   const existingText = useMemo(() => existing.map((k) => k.text), [existing]);
   const parsed = useMemo(() => parseKeywordList(raw, existingText), [raw, existingText]);
@@ -28,7 +29,10 @@ export function KeywordBulkInput({ existing }: { existing: Keyword[] }) {
   const already = parsed.filter((k) => !k.duplicate && k.existing).length;
 
   const submit = () => {
-    bulk.mutate(submittableKeywords(parsed), { onSuccess: () => setRaw('') });
+    bulk.mutate(
+      { keywords: submittableKeywords(parsed), niche: niche || undefined },
+      { onSuccess: () => { setRaw(''); setNiche(''); } }
+    );
   };
 
   return (
@@ -41,6 +45,20 @@ export function KeywordBulkInput({ existing }: { existing: Keyword[] }) {
           rows={3}
           placeholder={'One per line — paste straight from a spreadsheet\nmechanical keyboard\nharry potter shirt'}
           data-testid="keyword-paste"
+          className={cn(
+            'w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm',
+            'placeholder:text-slate-400 focus:border-slate-500 focus:ring-1 focus:ring-slate-500 focus:outline-none',
+          )}
+        />
+      </label>
+      
+      <label className="mt-3 flex flex-col gap-1">
+        <span className="text-[11px] font-medium text-slate-500">Niche (optional, groups these keywords)</span>
+        <input
+          type="text"
+          value={niche}
+          onChange={(e) => setNiche(e.target.value)}
+          placeholder="e.g. keycaps"
           className={cn(
             'w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm',
             'placeholder:text-slate-400 focus:border-slate-500 focus:ring-1 focus:ring-slate-500 focus:outline-none',

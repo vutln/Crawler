@@ -43,7 +43,8 @@ describe('CrawlRunnerService.upsert', () => {
 
     const prisma = {
       product: {
-        findUnique: () => Promise.resolve(opts.existing ? { id: 'prod_1' } : null),
+        findUnique: () =>
+          Promise.resolve(opts.existing ? { id: 'prod_1' } : null),
       },
       $transaction: (fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
     } as unknown as PrismaService;
@@ -74,10 +75,17 @@ describe('CrawlRunnerService.upsert', () => {
   }
 
   /** upsert is private; it is the unit under test, and going through execute() would mock a DB instead. */
-  function upsert(runner: CrawlRunnerService, r: ProductRecord): Promise<unknown> {
+  function upsert(
+    runner: CrawlRunnerService,
+    r: ProductRecord,
+  ): Promise<unknown> {
     return (
       runner as unknown as {
-        upsert: (r: ProductRecord, m: Marketplace, id: string) => Promise<unknown>;
+        upsert: (
+          r: ProductRecord,
+          m: Marketplace,
+          id: string,
+        ) => Promise<unknown>;
       }
     ).upsert(r, Marketplace.EBAY, 'run_1');
   }
@@ -101,7 +109,14 @@ describe('CrawlRunnerService.upsert', () => {
     const { runner, captured } = makeRunner({ existing: true });
 
     // Exactly what ebay-api emits: no reviewCount, no rating, no imageUrl.
-    await upsert(runner, record({ reviewCount: undefined, rating: undefined, imageUrl: undefined }));
+    await upsert(
+      runner,
+      record({
+        reviewCount: undefined,
+        rating: undefined,
+        imageUrl: undefined,
+      }),
+    );
 
     // Each of these was `null` before the fix, and null is what erased the data.
     // toBeUndefined() fails on null, so this is the regression.

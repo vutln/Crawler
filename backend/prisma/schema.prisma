@@ -67,7 +67,8 @@ model Keyword {
   id    String  @id @default(cuid())
   /// Normalized to lower+trim by KeywordsService before write; the unique index
   /// is only meaningful if every caller does that, so no one may write it raw.
-  text  String  @unique @db.VarChar(191)
+  text  String  @unique @db.VarChar(255)
+  niche String? @db.VarChar(255)
   notes String? @db.Text
 
   createdAt DateTime @default(now())

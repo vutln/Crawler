@@ -32,8 +32,17 @@ export class EbaySeleniumAdapter extends SeleniumAdapterBase {
    * degrades one field instead of killing the run.
    */
   private readonly sel = {
-    resultItem: ['li.s-item', 'li.s-card', 'ul.srp-results > li[data-viewport]'],
-    title: ['.s-item__title', '.s-card__title', 'h3.s-item__title', '[role="heading"]'],
+    resultItem: [
+      'li.s-item',
+      'li.s-card',
+      'ul.srp-results > li[data-viewport]',
+    ],
+    title: [
+      '.s-item__title',
+      '.s-card__title',
+      'h3.s-item__title',
+      '[role="heading"]',
+    ],
     price: ['.s-item__price', '.s-card__price'],
     link: ['a.s-item__link', 'a.s-card__link', 'a[href*="/itm/"]'],
     /**
@@ -48,7 +57,11 @@ export class EbaySeleniumAdapter extends SeleniumAdapterBase {
      * src. (The other 2 are the "Shop on eBay" promo rows, which parseCard drops
      * by title anyway.)
      */
-    image: ['img.s-card__image', '.s-item__image-wrapper img', 'img.s-item__image-img'],
+    image: [
+      'img.s-card__image',
+      '.s-item__image-wrapper img',
+      'img.s-item__image-img',
+    ],
     seller: ['.s-item__seller-info-text', '.s-card__seller-info'],
     reviews: ['.s-item__reviews-count', '.s-card__reviews-count'],
     subtitle: ['.s-item__subtitle', '.s-card__subtitle'],
@@ -132,7 +145,10 @@ export class EbaySeleniumAdapter extends SeleniumAdapterBase {
    * and exercise the real parser without touching live eBay. Everything below
    * this line is pure DOM -> ProductRecord and knows nothing about navigation.
    */
-  protected parseSearchPage(driver: WebDriver, context = 'eBay'): Promise<ProductRecord[]> {
+  protected parseSearchPage(
+    driver: WebDriver,
+    context = 'eBay',
+  ): Promise<ProductRecord[]> {
     // Body lives in the base — it was byte-identical across all three adapters,
     // comments included. This stays a protected method because two fixture specs
     // subclass to reach it, and that seam is worth more than the lines it saves.
@@ -182,19 +198,29 @@ export class EbaySeleniumAdapter extends SeleniumAdapterBase {
     };
   }
 
-  async fetchProduct(url: string, ctx: CrawlContext): Promise<ProductRecord | null> {
+  async fetchProduct(
+    url: string,
+    ctx: CrawlContext,
+  ): Promise<ProductRecord | null> {
     const externalId = this.extractItemId(url);
     if (!externalId) throw new Error(`Not an eBay item URL: ${url}`);
 
     return this.drivers.withDriver(async (driver) => {
       await this.navigate(driver, url, ctx);
 
-      const rendered = await this.waitForAny(driver, ['h1.x-item-title__mainTitle', 'h1']);
+      const rendered = await this.waitForAny(driver, [
+        'h1.x-item-title__mainTitle',
+        'h1',
+      ]);
       if (!rendered) return null;
 
       const body = await driver.findElement(By.css('body'));
 
-      const title = await this.textOf(body, ['h1.x-item-title__mainTitle span', 'h1 span', 'h1']);
+      const title = await this.textOf(body, [
+        'h1.x-item-title__mainTitle span',
+        'h1 span',
+        'h1',
+      ]);
       if (!title) return null;
 
       const priceText = await this.textOf(body, [
@@ -215,12 +241,21 @@ export class EbaySeleniumAdapter extends SeleniumAdapterBase {
         title: cleanText(title),
         price,
         currency: normalizeCurrency(currency),
-        inStock: price !== null && !/out of stock|sold out/i.test(availability ?? ''),
-        imageUrl: await this.attrOf(body, ['.ux-image-carousel-item img', '#icImg'], 'src'),
-        seller: cleanText(
-          (await this.textOf(body, ['.x-sellercard-atf__info__about-seller a', '.mbg-nw'])) ?? '',
-          191,
-        ) || undefined,
+        inStock:
+          price !== null && !/out of stock|sold out/i.test(availability ?? ''),
+        imageUrl: await this.attrOf(
+          body,
+          ['.ux-image-carousel-item img', '#icImg'],
+          'src',
+        ),
+        seller:
+          cleanText(
+            (await this.textOf(body, [
+              '.x-sellercard-atf__info__about-seller a',
+              '.mbg-nw',
+            ])) ?? '',
+            191,
+          ) || undefined,
         raw: { priceText, availability },
       };
     });

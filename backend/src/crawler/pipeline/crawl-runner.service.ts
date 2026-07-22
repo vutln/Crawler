@@ -1,9 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma, RunStatus, type CrawlJob, type Keyword } from '../../generated/prisma/client';
+import {
+  Prisma,
+  RunStatus,
+  type CrawlJob,
+  type Keyword,
+} from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdapterRegistry } from '../adapters/adapter.registry';
-import { BlockedError, type CrawlContext, type ProductRecord } from '../adapters/adapter.interface';
+import {
+  BlockedError,
+  type CrawlContext,
+  type ProductRecord,
+} from '../adapters/adapter.interface';
 import { UNKNOWN_CURRENCY } from '../normalize';
 
 export interface RunOutcome {
@@ -27,7 +36,9 @@ interface Tally {
   updated: number;
 }
 
-function toCounts(t: Tally): Pick<RunOutcome, 'itemsFound' | 'itemsNew' | 'itemsUpdated'> {
+function toCounts(
+  t: Tally,
+): Pick<RunOutcome, 'itemsFound' | 'itemsNew' | 'itemsUpdated'> {
   return { itemsFound: t.found, itemsNew: t.created, itemsUpdated: t.updated };
 }
 
@@ -105,7 +116,13 @@ export class CrawlRunnerService {
 
     let outcome: RunOutcome;
     try {
-      outcome = await this.collect(run.job, runId, controller.signal, stats, run.keyword);
+      outcome = await this.collect(
+        run.job,
+        runId,
+        controller.signal,
+        stats,
+        run.keyword,
+      );
     } catch (err) {
       outcome = { ...this.classify(err), ...toCounts(stats) };
       this.logger.error(`Run ${runId} failed: ${outcome.error}`);
@@ -203,7 +220,13 @@ export class CrawlRunnerService {
       // stats.found IS the 1-based position within this run, and adapters yield in
       // page order — so rank costs nothing extra to capture and is the only way to
       // answer "did we slip off page 1 for this keyword".
-      const result = await this.upsert(record, job.marketplace, runId, keyword?.id, stats.found);
+      const result = await this.upsert(
+        record,
+        job.marketplace,
+        runId,
+        keyword?.id,
+        stats.found,
+      );
       if (result === 'created') stats.created++;
       else stats.updated++;
     };
@@ -269,7 +292,8 @@ export class CrawlRunnerService {
       brand: record.brand,
       seller: record.seller,
       imageUrl: record.imageUrl,
-      rating: record.rating != null ? new Prisma.Decimal(record.rating) : undefined,
+      rating:
+        record.rating != null ? new Prisma.Decimal(record.rating) : undefined,
       reviewCount: record.reviewCount,
     };
 
@@ -282,7 +306,9 @@ export class CrawlRunnerService {
      */
     const labelled = record.currency !== null;
     const price =
-      labelled && record.price != null ? new Prisma.Decimal(record.price) : null;
+      labelled && record.price != null
+        ? new Prisma.Decimal(record.price)
+        : null;
 
     if (record.price != null && !labelled) {
       this.logger.warn(
@@ -297,7 +323,10 @@ export class CrawlRunnerService {
     await this.prisma.$transaction(async (tx) => {
       const product = await tx.product.upsert({
         where: {
-          marketplace_externalId: { marketplace, externalId: record.externalId },
+          marketplace_externalId: {
+            marketplace,
+            externalId: record.externalId,
+          },
         },
         create: {
           marketplace,
@@ -347,7 +376,12 @@ export class CrawlRunnerService {
       if (keywordId) {
         await tx.productKeyword.upsert({
           where: { productId_keywordId: { productId: product.id, keywordId } },
-          create: { productId: product.id, keywordId, marketplace, lastRank: rank },
+          create: {
+            productId: product.id,
+            keywordId,
+            marketplace,
+            lastRank: rank,
+          },
           update: { lastSeenAt: new Date(), lastRank: rank },
         });
       }

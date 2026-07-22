@@ -1,6 +1,11 @@
 import type { ConfigService } from '@nestjs/config';
 import type { SchedulerRegistry } from '@nestjs/schedule';
-import { CrawlJobType, Marketplace, RunStatus, RunTrigger } from '../../generated/prisma/client';
+import {
+  CrawlJobType,
+  Marketplace,
+  RunStatus,
+  RunTrigger,
+} from '../../generated/prisma/client';
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { ICrawlQueue } from './crawl-queue.interface';
 import { SchedulerService } from './scheduler.service';
@@ -33,7 +38,9 @@ describe('SchedulerService — KEYWORD_SWEEP fan-out', () => {
     // Mirrors the real WHERE: the job's selection is the ONLY filter. There used to
     // be a global Keyword.enabled AND-condition here that could veto a job's
     // explicit pick; it's gone, so what a job collects is readable from the job.
-    const selected = (opts.keywords ?? []).filter((k) => trackAll || k.tracked === true);
+    const selected = (opts.keywords ?? []).filter(
+      (k) => trackAll || k.tracked === true,
+    );
 
     const prisma = {
       crawlRun: {
@@ -46,7 +53,8 @@ describe('SchedulerService — KEYWORD_SWEEP fan-out', () => {
           created.push(...data);
           return Promise.resolve({ count: data.length });
         },
-        findMany: () => Promise.resolve(created.map((_, i) => ({ id: `run_${i}` }))),
+        findMany: () =>
+          Promise.resolve(created.map((_, i) => ({ id: `run_${i}` }))),
       },
       crawlJob: {
         findUnique: () =>
@@ -57,7 +65,9 @@ describe('SchedulerService — KEYWORD_SWEEP fan-out', () => {
             trackAllKeywords: trackAll,
           }),
       },
-      keyword: { findMany: () => Promise.resolve(selected.map((k) => ({ id: k.id }))) },
+      keyword: {
+        findMany: () => Promise.resolve(selected.map((k) => ({ id: k.id }))),
+      },
     } as unknown as PrismaService;
 
     const registry = {} as SchedulerRegistry;
@@ -67,11 +77,16 @@ describe('SchedulerService — KEYWORD_SWEEP fan-out', () => {
         return Promise.resolve();
       },
     } as unknown as ICrawlQueue;
-    const config = { get: (_k: string, d: string) => d } as unknown as ConfigService;
+    const config = {
+      get: (_k: string, d: string) => d,
+    } as unknown as ConfigService;
 
     const service = new SchedulerService(prisma, registry, queue, config);
-    const trigger = (service as unknown as { trigger: (id: string, label: string) => Promise<void> })
-      .trigger.bind(service);
+    const trigger = (
+      service as unknown as {
+        trigger: (id: string, label: string) => Promise<void>;
+      }
+    ).trigger.bind(service);
 
     return { trigger, created, enqueued };
   }

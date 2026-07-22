@@ -1,11 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
-import { Marketplace } from '../../generated/prisma/client';
 import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
-  IsBoolean,
   IsOptional,
   IsString,
   MaxLength,
@@ -13,20 +10,26 @@ import {
 } from 'class-validator';
 
 /**
- * 191 everywhere, matching Keyword.text's @db.VarChar(191).
- *
- * 191 rather than 255 is a utf8mb4 constraint, not an arbitrary pick: 191 * 4
- * bytes is the largest value that still fits MySQL's index key limit, which the
- * @unique on text needs.
+ * 255 everywhere, matching Keyword.text's @db.VarChar(255).
+ * (Note: Ensure MySQL config innodb_large_prefix is enabled if using utf8mb4)
  */
-const MAX_KEYWORD_LENGTH = 191;
+const MAX_KEYWORD_LENGTH = 255;
 
 export class CreateKeywordDto {
-  @ApiProperty({ example: 'mechanical keyboard', maxLength: MAX_KEYWORD_LENGTH })
+  @ApiProperty({
+    example: 'mechanical keyboard',
+    maxLength: MAX_KEYWORD_LENGTH,
+  })
   @IsString()
   @MinLength(1)
   @MaxLength(MAX_KEYWORD_LENGTH)
   text!: string;
+
+  @ApiPropertyOptional({ nullable: true, maxLength: 255 })
+  @IsString()
+  @MaxLength(255)
+  @IsOptional()
+  niche?: string | null;
 
   @ApiPropertyOptional({ nullable: true })
   @IsString()
@@ -46,8 +49,13 @@ export class CreateKeywordDto {
 export class BulkCreateKeywordsDto {
   @ApiProperty({
     type: [String],
-    example: ['mechanical keyboard', 'harry potter shirt', 'vintage film camera'],
-    description: 'Normalized and de-duplicated server-side; order is preserved.',
+    example: [
+      'mechanical keyboard',
+      'harry potter shirt',
+      'vintage film camera',
+    ],
+    description:
+      'Normalized and de-duplicated server-side; order is preserved.',
   })
   @IsArray()
   @ArrayMinSize(1)
@@ -57,11 +65,18 @@ export class BulkCreateKeywordsDto {
   @IsString({ each: true })
   @MaxLength(MAX_KEYWORD_LENGTH, { each: true })
   keywords!: string[];
+
+  @ApiPropertyOptional({ nullable: true, maxLength: 255 })
+  @IsString()
+  @MaxLength(255)
+  @IsOptional()
+  niche?: string | null;
 }
 
 export class KeywordDto {
   @ApiProperty() id!: string;
   @ApiProperty() text!: string;
+  @ApiProperty({ nullable: true, type: String }) niche!: string | null;
   @ApiProperty({ nullable: true, type: String }) notes!: string | null;
   @ApiProperty() createdAt!: string;
   /** How many products this keyword has surfaced, across every marketplace. */
@@ -75,6 +90,12 @@ export class UpdateKeywordDto {
   @MaxLength(MAX_KEYWORD_LENGTH)
   @IsOptional()
   text?: string;
+
+  @ApiPropertyOptional({ nullable: true, maxLength: 255 })
+  @IsString()
+  @MaxLength(255)
+  @IsOptional()
+  niche?: string | null;
 
   @ApiPropertyOptional({ nullable: true })
   @IsString()
@@ -92,7 +113,8 @@ export class BulkCreateKeywordsResultDto {
   skipped!: string[];
   @ApiProperty({
     type: [String],
-    description: 'Terms that collapsed to a duplicate of another term in the same paste.',
+    description:
+      'Terms that collapsed to a duplicate of another term in the same paste.',
   })
   duplicates!: string[];
 }

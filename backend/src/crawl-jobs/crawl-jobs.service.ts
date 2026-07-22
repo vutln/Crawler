@@ -82,7 +82,9 @@ export class CrawlJobsService {
         // not discarded, so toggling the flag off later restores the picks rather
         // than silently emptying them.
         ...(dto.keywordIds?.length && {
-          keywords: { create: dto.keywordIds.map((keywordId) => ({ keywordId })) },
+          keywords: {
+            create: dto.keywordIds.map((keywordId) => ({ keywordId })),
+          },
         }),
       },
       include: JOB_INCLUDE,
@@ -98,7 +100,7 @@ export class CrawlJobsService {
       include: {
         ...JOB_INCLUDE,
         runs: {
-          orderBy: { createdAt: "desc" },
+          orderBy: { createdAt: 'desc' },
           take: 1,
           include: { job: { select: { name: true, marketplace: true } } },
         },
@@ -113,7 +115,7 @@ export class CrawlJobsService {
       include: {
         ...JOB_INCLUDE,
         runs: {
-          orderBy: { createdAt: "desc" },
+          orderBy: { createdAt: 'desc' },
           take: 1,
           include: { job: { select: { name: true, marketplace: true } } },
         },
@@ -132,7 +134,7 @@ export class CrawlJobsService {
       data: {
         ...(dto.name !== undefined && { name: dto.name }),
         ...(dto.urls !== undefined && {
-          urls: dto.urls as unknown as Prisma.InputJsonValue,
+          urls: dto.urls,
         }),
         ...(dto.maxPages !== undefined && { maxPages: dto.maxPages }),
         ...(dto.maxItems !== undefined && { maxItems: dto.maxItems }),
@@ -290,7 +292,10 @@ export class CrawlJobsService {
     }
   }
 
-  private toJobDto(job: JobWithKeywords, lastRun: RunWithJob | null): CrawlJobDto {
+  private toJobDto(
+    job: JobWithKeywords,
+    lastRun: RunWithJob | null,
+  ): CrawlJobDto {
     return {
       id: job.id,
       name: job.name,

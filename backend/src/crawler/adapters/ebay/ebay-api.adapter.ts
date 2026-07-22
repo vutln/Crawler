@@ -89,7 +89,10 @@ export class EbayApiAdapter implements MarketplaceAdapter {
         `https://api.ebay.com/buy/browse/v1/item_summary/search` +
         `?q=${encodeURIComponent(ctx.query)}&limit=${pageSize}&offset=${page * pageSize}`;
 
-      const body = await this.request<{ itemSummaries?: EbayItemSummary[] }>(url, ctx);
+      const body = await this.request<{ itemSummaries?: EbayItemSummary[] }>(
+        url,
+        ctx,
+      );
       const items = body.itemSummaries ?? [];
       if (items.length === 0) return;
 
@@ -101,7 +104,10 @@ export class EbayApiAdapter implements MarketplaceAdapter {
     }
   }
 
-  async fetchProduct(url: string, ctx: CrawlContext): Promise<ProductRecord | null> {
+  async fetchProduct(
+    url: string,
+    ctx: CrawlContext,
+  ): Promise<ProductRecord | null> {
     const legacyId = /\/itm\/(?:[^/]+\/)?(\d{9,15})/.exec(url)?.[1];
     if (!legacyId) throw new Error(`Not an eBay item URL: ${url}`);
 
@@ -161,7 +167,9 @@ export class EbayApiAdapter implements MarketplaceAdapter {
 
     if (!res.ok) {
       this.throttle.recordFailure(url);
-      throw new Error(`eBay API ${res.status}: ${cleanText(await res.text(), 300)}`);
+      throw new Error(
+        `eBay API ${res.status}: ${cleanText(await res.text(), 300)}`,
+      );
     }
 
     this.throttle.recordSuccess(url);
@@ -170,9 +178,12 @@ export class EbayApiAdapter implements MarketplaceAdapter {
 
   /** Client-credentials token, cached with a 60s safety margin. */
   private async accessToken(): Promise<string> {
-    if (this.token && Date.now() < this.token.expiresAt) return this.token.value;
+    if (this.token && Date.now() < this.token.expiresAt)
+      return this.token.value;
 
-    const basic = Buffer.from(`${this.appId}:${this.certId}`).toString('base64');
+    const basic = Buffer.from(`${this.appId}:${this.certId}`).toString(
+      'base64',
+    );
 
     const res = await fetch('https://api.ebay.com/identity/v1/oauth2/token', {
       method: 'POST',
@@ -187,10 +198,15 @@ export class EbayApiAdapter implements MarketplaceAdapter {
     });
 
     if (!res.ok) {
-      throw new Error(`eBay OAuth failed (${res.status}): check EBAY_APP_ID / EBAY_CERT_ID`);
+      throw new Error(
+        `eBay OAuth failed (${res.status}): check EBAY_APP_ID / EBAY_CERT_ID`,
+      );
     }
 
-    const json = (await res.json()) as { access_token: string; expires_in: number };
+    const json = (await res.json()) as {
+      access_token: string;
+      expires_in: number;
+    };
     this.token = {
       value: json.access_token,
       expiresAt: Date.now() + (json.expires_in - 60) * 1000,

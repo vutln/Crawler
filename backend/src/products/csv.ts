@@ -31,7 +31,9 @@ const FORMULA_START = /^[=+\-@\t\r]/;
  * Note the order: prefix FIRST, then quote, or the apostrophe lands outside the
  * quotes and does nothing.
  */
-export function csvCell(value: string | number | boolean | null | undefined): string {
+export function csvCell(
+  value: string | number | boolean | null | undefined,
+): string {
   if (value === null || value === undefined) return '';
 
   let s = String(value);
@@ -41,7 +43,9 @@ export function csvCell(value: string | number | boolean | null | undefined): st
 }
 
 /** One CSV row, CRLF-terminated per RFC 4180 (and what Excel expects). */
-export function csvRow(values: Array<string | number | boolean | null | undefined>): string {
+export function csvRow(
+  values: Array<string | number | boolean | null | undefined>,
+): string {
   return values.map(csvCell).join(',') + '\r\n';
 }
 

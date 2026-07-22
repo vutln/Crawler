@@ -53,7 +53,7 @@ export function useCreateKeyword() {
 export function useBulkCreateKeywords() {
   const invalidate = useInvalidateKeywords();
   return useMutation({
-    mutationFn: (keywords: string[]) => bulkCreateKeywords(keywords),
+    mutationFn: (args: { keywords: string[]; niche?: string }) => bulkCreateKeywords(args.keywords, args.niche),
     onSuccess: async (result) => {
       // Report what actually happened. "12 added, 3 already there" is the difference
       // between a trustworthy paste and a silent no-op the user has to go verify.

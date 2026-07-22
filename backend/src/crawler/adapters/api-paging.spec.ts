@@ -39,9 +39,14 @@ describe('API adapter page size', () => {
   it.each([
     ['eBay', EbayApiAdapter, 60],
     ['Etsy', EtsyApiAdapter, 64],
-  ])('%s stays bounded when maxItems is Infinity (a sweep)', (_label, cls, expected) => {
-    expect(Math.min(pageSizeOf(cls), Number.POSITIVE_INFINITY)).toBe(expected);
-  });
+  ])(
+    '%s stays bounded when maxItems is Infinity (a sweep)',
+    (_label, cls, expected) => {
+      expect(Math.min(pageSizeOf(cls), Number.POSITIVE_INFINITY)).toBe(
+        expected,
+      );
+    },
+  );
 
   it.each([
     ['eBay', EbayApiAdapter],

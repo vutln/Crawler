@@ -22,11 +22,17 @@ describe('parsePrice', () => {
   // The single most dangerous case in the whole crawler: get the separator
   // convention wrong and the stored price is off by 1000x, silently.
   it('treats the LAST separator as the decimal point (EU format)', () => {
-    expect(parsePrice('€1.234,56')).toEqual({ price: 1234.56, currency: 'EUR' });
+    expect(parsePrice('€1.234,56')).toEqual({
+      price: 1234.56,
+      currency: 'EUR',
+    });
   });
 
   it('treats the LAST separator as the decimal point (US format)', () => {
-    expect(parsePrice('$1,234.56')).toEqual({ price: 1234.56, currency: 'USD' });
+    expect(parsePrice('$1,234.56')).toEqual({
+      price: 1234.56,
+      currency: 'USD',
+    });
   });
 
   it('reads a lone separator with 3 trailing digits as thousands, not decimals', () => {
@@ -42,7 +48,10 @@ describe('parsePrice', () => {
    * 1,000,000x error that looks completely plausible in a price column.
    */
   it('treats repeated separators as thousands grouping, never as decimals', () => {
-    expect(parsePrice('VND 3,674,457')).toEqual({ price: 3674457, currency: 'VND' });
+    expect(parsePrice('VND 3,674,457')).toEqual({
+      price: 3674457,
+      currency: 'VND',
+    });
     expect(parsePrice('₫2,886,792').price).toBe(2886792);
     expect(parsePrice('3.674.457').price).toBe(3674457); // EU grouping
     expect(parsePrice('$1,234,567.89').price).toBe(1234567.89); // US, mixed
@@ -168,7 +177,7 @@ describe('parseReviewCount', () => {
   // The word "ratings" is what a COUNT is called on Amazon — screening it out
   // would discard the only reliable hook on the card. Only "out of"/"stars"
   // distinguish a rating from a count.
-  it('still reads Amazon\'s own aria-label count', () => {
+  it("still reads Amazon's own aria-label count", () => {
     expect(parseReviewCount('1,648 ratings')).toBe(1648);
     expect(parseReviewCount('13 ratings')).toBe(13);
   });
@@ -182,7 +191,9 @@ describe('canonicalUrl', () => {
   });
 
   it('keeps meaningful params', () => {
-    expect(canonicalUrl('https://www.ebay.com/itm/123?_nkw=camera')).toContain('_nkw=camera');
+    expect(canonicalUrl('https://www.ebay.com/itm/123?_nkw=camera')).toContain(
+      '_nkw=camera',
+    );
   });
 
   it('resolves relative URLs against the base', () => {

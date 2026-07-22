@@ -54,7 +54,7 @@ describe('csvCell', () => {
       expect(csvCell(input).replace(/^"/, '')).toMatch(/^'/);
     });
 
-    it("prefixes BEFORE quoting, so the apostrophe stays inside the quotes", () => {
+    it('prefixes BEFORE quoting, so the apostrophe stays inside the quotes', () => {
       // Order matters: quote-then-prefix would put the ' outside the quotes, where
       // Excel ignores it and the formula runs anyway.
       expect(csvCell('=cmd|"/c calc"!A1')).toBe(`"'=cmd|""/c calc""!A1"`);
@@ -86,7 +86,9 @@ describe('csvRow', () => {
   });
 
   it('escapes each cell independently', () => {
-    expect(csvRow(['Mug, large', '=cmd', 12.5])).toBe(`"Mug, large",'=cmd,12.5\r\n`);
+    expect(csvRow(['Mug, large', '=cmd', 12.5])).toBe(
+      `"Mug, large",'=cmd,12.5\r\n`,
+    );
   });
 });
 
@@ -98,6 +100,8 @@ describe('UTF8_BOM', () => {
    */
   it('is the UTF-8 BOM', () => {
     expect(UTF8_BOM).toBe('﻿');
-    expect(Buffer.from(UTF8_BOM, 'utf8')).toEqual(Buffer.from([0xef, 0xbb, 0xbf]));
+    expect(Buffer.from(UTF8_BOM, 'utf8')).toEqual(
+      Buffer.from([0xef, 0xbb, 0xbf]),
+    );
   });
 });

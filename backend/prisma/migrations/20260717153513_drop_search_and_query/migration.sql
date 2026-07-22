@@ -17,5 +17,5 @@
 --
 -- Recovery: none needed. Nothing reads `query`, and re-adding a job type is a
 -- one-line enum change.
-ALTER TABLE `crawljob` DROP COLUMN `query`,
-    MODIFY `type` ENUM('KEYWORD_SWEEP', 'PRODUCT_URLS') NOT NULL;
+ALTER TABLE `CrawlJob` DROP COLUMN `query`,
+    MODIFY `type` ENUM('PRODUCT_URLS', 'CATEGORY', 'KEYWORD_SWEEP') NOT NULL;

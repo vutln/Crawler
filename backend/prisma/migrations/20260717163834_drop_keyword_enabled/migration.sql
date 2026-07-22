@@ -12,10 +12,10 @@
 -- could explicitly select a keyword and still not collect it, a rule discoverable
 -- only by reading SchedulerService.
 --
--- To stop collecting a term now: deselect it on the job, or delete the keyword.
+-- To stop collecting a term now: deselect it on the job, or delete the Keyword.
 -- Deleting drops its ProductKeyword links but never the products or price history.
 --
 -- Recovery: re-adding a boolean column is a one-line migration. No data is lost
 -- that isn't reconstructible, because the column carried no information (all true).
-DROP INDEX `Keyword_enabled_idx` ON `keyword`;
-ALTER TABLE `keyword` DROP COLUMN `enabled`;
+DROP INDEX `Keyword_enabled_idx` ON `Keyword`;
+ALTER TABLE `Keyword` DROP COLUMN `enabled`;

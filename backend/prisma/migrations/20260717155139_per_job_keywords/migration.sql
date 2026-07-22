@@ -9,7 +9,7 @@
 -- keywords yet" are different intentions, and an empty join table cannot tell them
 -- apart. Guessing between them is how a job silently collects nothing — or silently
 -- collects everything — and nobody finds out until the data is wrong.
-ALTER TABLE `crawljob` ADD COLUMN `trackAllKeywords` BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE `CrawlJob` ADD COLUMN `trackAllKeywords` BOOLEAN NOT NULL DEFAULT true;
 
 CREATE TABLE `CrawlJobKeyword` (
     `jobId` VARCHAR(191) NOT NULL,

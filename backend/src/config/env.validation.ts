@@ -265,7 +265,7 @@ export class EnvVars {
    */
   @IsString()
   @IsOptional()
-  @Matches(/^\d{5}$/, {
+  @Matches(/^(\d{5})?$/, {
     message:
       'AMAZON_DELIVERY_ZIP must be a 5-digit US ZIP (e.g. 00501), or empty to not set one',
   })

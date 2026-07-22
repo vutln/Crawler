@@ -5,6 +5,7 @@ import type { Product, ProductSortBy, SortOrder } from '@/types';
 
 const COLUMNS: Array<{ key: ProductSortBy | null; label: string; className?: string }> = [
   { key: 'title', label: 'Product' },
+  { key: null, label: 'Brand' },
   { key: null, label: 'Site' },
   { key: 'price', label: 'Price', className: 'text-right' },
   { key: null, label: '7d', className: 'text-right' },
@@ -64,49 +65,55 @@ export function ProductsTable({
                 className="border-t border-slate-100 hover:bg-slate-50"
                 data-testid="product-row"
               >
-                <td className="max-w-md px-3 py-1.5">
+                <td className="max-w-md px-3 py-1.5 align-top">
                   {/*
                     imageUrl has been collected since the first crawl and rendered
                     nowhere — it is one of the four required fields. Thumbnail is
                     fixed-size so adding it cannot reflow the table.
                   */}
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-start gap-2 pt-1">
                     <Thumbnail src={p.imageUrl} alt="" />
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <Link
                         to={`/products/${p.id}`}
-                        className="block truncate font-medium text-slate-800 hover:text-blue-600"
+                        className="block font-medium text-slate-800 hover:text-blue-600"
                         title={p.title}
                       >
                         {p.title}
                       </Link>
-                      {p.brand && <span className="text-[11px] text-slate-400">{p.brand}</span>}
                     </div>
                   </div>
                 </td>
-                <td className="px-3 py-1.5">
+                <td className="px-3 py-1.5 align-top pt-2.5">
+                  {p.brand ? (
+                    <span className="text-[11px] text-slate-600 font-medium bg-slate-100 px-1.5 py-0.5 rounded inline-block whitespace-nowrap overflow-hidden text-ellipsis max-w-xs">{p.brand}</span>
+                  ) : (
+                    <span className="text-[11px] text-slate-400">—</span>
+                  )}
+                </td>
+                <td className="px-3 py-1.5 align-top pt-2.5">
                   <SiteBadge marketplace={p.marketplace} />
                 </td>
-                <td className="tnum px-3 py-1.5 text-right font-medium">
+                <td className="tnum px-3 py-1.5 text-right font-medium align-top pt-2.5">
                   {formatCurrency(p.currentPrice ?? null, p.currency)}
                 </td>
-                <td className="px-3 py-1.5 text-right">
+                <td className="px-3 py-1.5 text-right align-top pt-2.5">
                   <PriceDelta value={p.priceChange7d} />
                 </td>
-                <td className="tnum px-3 py-1.5 text-right text-slate-600">
+                <td className="tnum px-3 py-1.5 text-right text-slate-600 align-top pt-2.5">
                   {p.rating != null ? `${p.rating.toFixed(1)}★` : '—'}
                   {p.reviewCount != null && (
                     <span className="ml-1 text-slate-400">({formatNumber(p.reviewCount)})</span>
                   )}
                 </td>
-                <td className="px-3 py-1.5">
+                <td className="px-3 py-1.5 align-top pt-2.5">
                   <span className={p.inStock ? 'text-green-700' : 'text-slate-400'}>
                     {p.inStock ? 'In stock' : 'Out'}
                   </span>
                 </td>
-                <td className="tnum px-3 py-1.5 text-right text-slate-500">{p.snapshotCount}</td>
+                <td className="tnum px-3 py-1.5 text-right text-slate-500 align-top pt-2.5">{p.snapshotCount}</td>
                 <td
-                  className="px-3 py-1.5 text-right text-slate-500"
+                  className="px-3 py-1.5 text-right text-slate-500 align-top pt-2.5"
                   title={new Date(p.lastScrapedAt).toLocaleString()}
                 >
                   {formatRelative(p.lastScrapedAt)}

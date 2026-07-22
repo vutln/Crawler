@@ -29,7 +29,7 @@ export type StatsOverview = components['schemas']['StatsOverviewDto'];
 export type MarketplaceStat = components['schemas']['MarketplaceStatDto'];
 
 // Renaming a controller method breaks these loudly, here, in one file.
-export type ProductListQuery = NonNullable<operations['ProductsController_list']['parameters']['query']>;
+export type ProductListQuery = NonNullable<operations['ProductsController_list']['parameters']['query']> & { niche?: string };
 /**
  * The list query minus paging — the backend derives it from ListProductsDto via
  * OmitType, so it tracks every filter automatically. Taken from the generated
@@ -37,7 +37,7 @@ export type ProductListQuery = NonNullable<operations['ProductsController_list']
  */
 export type ProductExportQuery = NonNullable<
   operations['ProductsController_exportCsv']['parameters']['query']
->;
+> & { niche?: string };
 
 export type CrawlJobListQuery = NonNullable<operations['CrawlJobsController_findAll']['parameters']['query']>
 

@@ -73,6 +73,16 @@ export function ProductsFilterBar({
         testId="keyword-filter"
       />
 
+      <Select<string>
+        value={filters.niche ?? ''}
+        onChange={(v) => onChange({ niche: v })}
+        placeholder="All niches"
+        options={Array.from(new Set((keywords.data ?? []).map((k) => k.niche).filter(Boolean))).map(
+          (niche) => ({ value: niche!, label: niche! }),
+        )}
+        testId="niche-filter"
+      />
+
       <Input
         type="number"
         value={filters.minPrice?.toString() ?? ''}

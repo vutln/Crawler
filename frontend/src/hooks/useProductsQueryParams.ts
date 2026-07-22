@@ -14,6 +14,7 @@ export interface ProductFilters {
    * simply empty — which degrades better than a 400 on a hand-edited URL.
    */
   keywordId?: string;
+  niche?: string;
   minPrice?: number;
   maxPrice?: number;
   inStock?: boolean;
@@ -52,6 +53,7 @@ export function useProductsQueryParams() {
       search: searchParams.get('search') ?? '',
       marketplace: isMarketplace(marketplace) ? marketplace : undefined,
       keywordId: searchParams.get('keywordId') ?? undefined,
+      niche: searchParams.get('niche') ?? undefined,
       minPrice: floatParam(searchParams.get('minPrice')),
       maxPrice: floatParam(searchParams.get('maxPrice')),
       inStock: inStock === 'true' ? true : inStock === 'false' ? false : undefined,
@@ -99,6 +101,7 @@ export function useProductsQueryParams() {
       ...(filters.search && { search: filters.search }),
       ...(filters.marketplace && { marketplace: filters.marketplace }),
       ...(filters.keywordId && { keywordId: filters.keywordId }),
+      ...(filters.niche && { niche: filters.niche }),
       ...(filters.minPrice !== undefined && { minPrice: filters.minPrice }),
       ...(filters.maxPrice !== undefined && { maxPrice: filters.maxPrice }),
       ...(filters.inStock !== undefined && { inStock: filters.inStock }),
@@ -115,6 +118,7 @@ export function useProductsQueryParams() {
     // otherwise show "No products collected yet — go run a crawl" and no way to
     // clear, rather than "nothing matches this filter".
     filters.keywordId !== undefined ||
+    filters.niche !== undefined ||
     filters.minPrice !== undefined ||
     filters.maxPrice !== undefined ||
     filters.inStock !== undefined;

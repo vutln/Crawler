@@ -71,8 +71,14 @@ export class ProductsService {
 
     // The keyword that surfaced the product. `some` because ProductKeyword is a
     // many-to-many: one product legitimately ranks for several keywords.
-    if (query.keywordId)
-      where.keywords = { some: { keywordId: query.keywordId } };
+    if (query.keywordId || query.niche) {
+      where.keywords = {
+        some: {
+          ...(query.keywordId && { keywordId: query.keywordId }),
+          ...(query.niche && { keyword: { niche: query.niche } }),
+        },
+      };
+    }
 
     if (query.minPrice !== undefined || query.maxPrice !== undefined) {
       where.currentPrice = {

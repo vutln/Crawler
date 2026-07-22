@@ -92,6 +92,13 @@ export class ListProductsDto {
   keywordId?: string;
 
   @ApiPropertyOptional({
+    description: 'Only products whose keyword belongs to this niche',
+  })
+  @IsString()
+  @IsOptional()
+  niche?: string;
+
+  @ApiPropertyOptional({
     enum: ProductSortBy,
     enumName: 'ProductSortBy',
     default: ProductSortBy.LastScrapedAt,
